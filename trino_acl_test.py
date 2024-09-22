@@ -31,14 +31,14 @@ def get_user_passwords(users_df):
         user_passwords[user] = password
     return user_passwords
 
-# Function to get Trino connection
+# Updated Function to get Trino connection using port 443 and https
 def get_trino_connection(host_url, user, password):
     return trino.dbapi.connect(
         host=host_url,
-        port=8080,  # Adjust port if necessary
+        port=443,  # Using port 443
         user=user,
         password=password,
-        http_scheme='http'
+        http_scheme='https'  # Using https
     )
 
 # Function to execute SQL and return status
@@ -177,7 +177,7 @@ def process_test_cases(file_path):
         user = user_row.iloc[0]['user']
         password = user_passwords[user]
 
-        # Establish connection to Trino
+        # Establish connection to Trino using port 443 and https
         conn = get_trino_connection(host_url, user, password)
 
         # Execute the SQL query and capture actual status
