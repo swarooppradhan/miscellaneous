@@ -25,11 +25,14 @@ def read_excel_data(file_path):
     trino_env_df = pd.read_excel(file_path, sheet_name='Trino Env')
     return test_cases_df, users_df, trino_env_df
 
-# Function to get passwords for unique users
-def get_user_passwords(users_df):
+# Function to get passwords for unique users based on the selected environment
+def get_user_passwords(users_df, selected_env):
     user_passwords = {}
-    for user in users_df['User'].unique():
-        password = getpass.getpass(prompt=f"Enter password for user '{user}': ")
+    # Filter users based on the selected environment
+    env_specific_users = users_df[users_df['Env'] == selected_env]
+    
+    for user in env_specific_users['User'].unique():
+        password = getpass.getpass(prompt=f"Enter password for user '{user}' in environment '{selected_env}': ")
         user_passwords[user] = password
     return user_passwords
 
@@ -146,8 +149,8 @@ def process_test_cases(file_path):
     if selected_team:
         test_cases_df = test_cases_df[test_cases_df['Team'] == selected_team]
 
-    # Get passwords for unique users
-    user_passwords = get_user_passwords(users_df)
+    # Get passwords for unique users based on the selected environment
+    user_passwords = get_user_passwords(users_df, selected_env)
 
     # Get the current timestamp for filenames
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -191,12 +194,12 @@ def process_test_cases(file_path):
 
         host_url = trino_env_row.iloc[0]['Host URL']
 
-        # Get the user and password for the group
-        user_row = users_df[users_df['Group'] == group]
+        # Identify the user based on the selected environment and group
+        user_row = users_df[(users_df['Env'] == selected_env) & (users_df['Group'] == group)]
         if user_row.empty:
             test_cases_df.at[index, 'Actual Status'] = 'ERROR'
             test_cases_df.at[index, 'Result'] = 'FAIL'
-            logging.error(f"User not found for group: {group}")
+            logging.error(f"User not found for Group: {group} in Environment: {selected_env}")
             continue
 
         user = user_row.iloc[0]['User']
