@@ -66,8 +66,9 @@ def execute_sql_with_trino(conn, sql_query):
         cursor = conn.cursor()
         cursor.execute(sql_query)
         
-        if sql_query.strip().lower().startswith(('select', 'with')):
-            results = cursor.fetchall()  # Only fetch results for SELECT queries
+        # Check if the query starts with SELECT, WITH, or SHOW
+        if sql_query.strip().lower().startswith(('select', 'with', 'show')):
+            results = cursor.fetchall()  # Fetch results for SELECT, WITH, or SHOW queries
             logging.info(f"Query executed successfully: \n{format_sql(sql_query)}")
             return "COMPLETED", results
         else:
