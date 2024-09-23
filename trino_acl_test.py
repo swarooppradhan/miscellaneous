@@ -6,6 +6,7 @@ import getpass
 import logging
 import datetime
 import sqlparse
+import re  # Import for handling regex
 
 # Function to set up logging with the desired log file name
 def setup_logging(team, env, timestamp):
@@ -45,6 +46,19 @@ def get_trino_connection(host_url, user, password):
 # Function to pretty format the SQL query
 def format_sql(sql_query):
     return sqlparse.format(sql_query, reindent=True, keyword_case='upper')
+
+# Function to replace variables in the SQL query
+def replace_variables_in_sql(sql_query):
+    # Find all variable placeholders in the format ##variable_name##
+    variables = re.findall(r"##(.*?)##", sql_query)
+    
+    for var in variables:
+        # Prompt user to enter a value for each variable
+        value = input(f"Enter value for variable '{var}': ")
+        # Replace the variable placeholder with the entered value in the query
+        sql_query = sql_query.replace(f"##{var}##", value)
+    
+    return sql_query
 
 # Function to execute SQL and return status
 def execute_sql_with_trino(conn, sql_query):
@@ -156,7 +170,10 @@ def process_test_cases(file_path):
         # Log the current test case number, use case, and query being executed
         logging.info(f"Executing Test Case Number: {test_case_number}")
         logging.info(f"Use Case: {use_case}")
-        logging.info(f"SQL query: \n{format_sql(sql_query)}")
+
+        # Replace variables in the SQL query if present
+        sql_query = replace_variables_in_sql(sql_query)
+        logging.info(f"SQL query after variable replacement: \n{format_sql(sql_query)}")
 
         # Get the correct host URL for the team, instance type, and selected environment
         trino_env_row = trino_env_df[
