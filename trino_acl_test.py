@@ -19,9 +19,9 @@ def setup_logging(team, env, timestamp):
 
 # Function to read the data from the Excel sheets
 def read_excel_data(file_path):
-    test_cases_df = pd.read_excel(file_path, sheet_name='Test cases')
+    test_cases_df = pd.read_excel(file_path, sheet_name='Test Cases')
     users_df = pd.read_excel(file_path, sheet_name='Users')
-    trino_env_df = pd.read_excel(file_path, sheet_name='Trino env')
+    trino_env_df = pd.read_excel(file_path, sheet_name='Trino Env')
     return test_cases_df, users_df, trino_env_df
 
 # Function to get passwords for unique users
@@ -69,12 +69,12 @@ def generate_output_filename(team, env, timestamp):
     return f"trino_test_results_{team or 'All'}_{env}_{timestamp}.xlsx"
 
 # Function to save results to a new Excel file
-def save_results_to_new_excel(file_path, df, sheet_name='Test cases'):
+def save_results_to_new_excel(file_path, df, sheet_name='Test Cases'):
     with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
 
 # Function to apply formatting (PASS = Green, FAIL = Red)
-def apply_result_formatting(file_path, df, sheet_name='Test cases'):
+def apply_result_formatting(file_path, df, sheet_name='Test Cases'):
     green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
     red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
 
@@ -82,7 +82,7 @@ def apply_result_formatting(file_path, df, sheet_name='Test cases'):
     sheet = workbook[sheet_name]
 
     for index, row in df.iterrows():
-        result_cell = sheet[f'H{index + 2}']  # Column H is the 'Result'
+        result_cell = sheet[f'I{index + 2}']  # Column I is the 'Result'
         if row['Result'] == 'PASS':
             result_cell.fill = green_fill
         elif row['Result'] == 'FAIL':
@@ -145,6 +145,7 @@ def process_test_cases(file_path):
 
     # Loop through each test case
     for index, test_case in test_cases_df.iterrows():
+        test_case_number = test_case['Test Case Number']
         team = test_case['Team']
         instance_type = test_case['Trino Instance Type']
         sql_query = test_case['SQL Query']
@@ -152,8 +153,9 @@ def process_test_cases(file_path):
         group = test_case['Group']
         use_case = test_case['Use Case']
 
-        # Log the current use case and query being executed
-        logging.info(f"Executing use case: {use_case}")
+        # Log the current test case number, use case, and query being executed
+        logging.info(f"Executing Test Case Number: {test_case_number}")
+        logging.info(f"Use Case: {use_case}")
         logging.info(f"SQL query: \n{format_sql(sql_query)}")
 
         # Get the correct host URL for the team, instance type, and selected environment
@@ -190,7 +192,7 @@ def process_test_cases(file_path):
         test_cases_df.at[index, 'Actual Status'] = actual_status
 
         # Log the response from the query execution
-        logging.info(f"Response for query execution: {response}")
+        logging.info(f"Response for Test Case Number {test_case_number}: {response}")
 
         # Compare actual status with expected status and determine result
         if actual_status == expected_status:
