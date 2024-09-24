@@ -114,7 +114,7 @@ def apply_result_formatting(file_path, df, sheet_name='Test Cases'):
     sheet = workbook[sheet_name]
 
     for index, row in df.iterrows():
-        result_cell = sheet[f'I{index + 2}']  # Column I is the 'Result'
+        result_cell = sheet[f'J{index + 2}']  # Column J is the 'Result'
         if row['Result'] == 'PASS':
             result_cell.fill = green_fill
         elif row['Result'] == 'FAIL':
@@ -147,6 +147,7 @@ def get_team_and_env_selection(test_cases_df, trino_env_df):
 
 # Main function to process test cases
 def process_test_cases(file_path):
+    # Read data from Excel sheets
     test_cases_df, users_df, trino_env_df = read_excel_data(file_path)
     
     # Get the directory of the provided Excel file
@@ -154,12 +155,22 @@ def process_test_cases(file_path):
 
     selected_team, selected_env = get_team_and_env_selection(test_cases_df, trino_env_df)
 
-    if selected_team:
-        test_cases_df = test_cases_df[test_cases_df['Team'] == selected_team]
+    # Filter test cases based on Execution Type
+    setup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Setup']
+    cleanup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Clean up']
+    
+    # Select only the 'Test' test cases for the selected team
+    test_cases_df = test_cases_df[
+        (test_cases_df['Execution Type'] == 'Test') & 
+        (test_cases_df['Team'] == selected_team)
+    ]
+
+    # Combine all test cases in the correct order: Setup -> Test -> Clean up
+    ordered_test_cases_df = pd.concat([setup_test_cases, test_cases_df, cleanup_test_cases], ignore_index=True)
 
     # Convert 'Actual Status' and 'Result' columns to object type to avoid dtype warning
-    test_cases_df['Actual Status'] = test_cases_df['Actual Status'].astype(object)
-    test_cases_df['Result'] = test_cases_df['Result'].astype(object)
+    ordered_test_cases_df['Actual Status'] = ordered_test_cases_df['Actual Status'].astype(object)
+    ordered_test_cases_df['Result'] = ordered_test_cases_df['Result'].astype(object)
 
     user_passwords = get_user_passwords(users_df, selected_env)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -167,16 +178,18 @@ def process_test_cases(file_path):
     log_filepath = setup_logging(excel_directory, selected_team, selected_env, timestamp)
     output_filename = generate_output_filename(excel_directory, selected_team, selected_env, timestamp)
 
-    for index, test_case in test_cases_df.iterrows():
+    # Execute each test case in the ordered list
+    for index, test_case in ordered_test_cases_df.iterrows():
         test_case_number = test_case['Test Case Number']
         team = test_case['Team']
         instance_type = test_case['Trino Instance Type']
         sql_query = test_case['SQL Query']
+        execution_type = test_case['Execution Type']
         expected_status = test_case['Expected Status']
         group = test_case['Group']
         use_case = test_case['Use Case']
 
-        logging.info(f"Executing Test Case Number: {test_case_number}")
+        logging.info(f"Executing Test Case Number: {test_case_number} | Execution Type: {execution_type}")
         logging.info(f"Use Case: {use_case}")
 
         sql_query = replace_variables_in_sql(sql_query)
@@ -189,8 +202,8 @@ def process_test_cases(file_path):
         ]
 
         if trino_env_row.empty:
-            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            test_cases_df.at[index, 'Result'] = 'FAIL'
+            ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
+            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
             logging.error(f"Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
             continue
 
@@ -198,8 +211,8 @@ def process_test_cases(file_path):
         user_row = users_df[(users_df['Env'] == selected_env) & (users_df['Group'] == group)]
         
         if user_row.empty:
-            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            test_cases_df.at[index, 'Result'] = 'FAIL'
+            ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
+            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
             logging.error(f"User not found for Group: {group} in Environment: {selected_env}")
             continue
 
@@ -208,20 +221,21 @@ def process_test_cases(file_path):
 
         conn = get_trino_connection(host_url, user, password)
         actual_status, response = execute_sql_with_trino(conn, sql_query)
-        test_cases_df.at[index, 'Actual Status'] = actual_status
+        ordered_test_cases_df.at[index, 'Actual Status'] = actual_status
 
         logging.info(f"Response for Test Case Number {test_case_number}: {response}")
 
         if actual_status == expected_status:
-            test_cases_df.at[index, 'Result'] = 'PASS'
+            ordered_test_cases_df.at[index, 'Result'] = 'PASS'
         else:
-            test_cases_df.at[index, 'Result'] = 'FAIL'
+            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
 
-    save_results_to_new_excel(output_filename, test_cases_df)
-    apply_result_formatting(output_filename, test_cases_df)
+    save_results_to_new_excel(output_filename, ordered_test_cases_df)
+    apply_result_formatting(output_filename, ordered_test_cases_df)
 
     print(f"Results have been saved to: {output_filename}")
     print(f"Logs have been saved to: {log_filepath}")
+
 
 # Example usage
 if __name__ == "__main__":
