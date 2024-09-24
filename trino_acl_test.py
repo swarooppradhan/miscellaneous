@@ -59,6 +59,9 @@ def replace_variables_in_sql(sql_query):
     for var in variables:
         value = input(f"Enter value for variable '{var}': ")
         sql_query = sql_query.replace(f"##{var}##", value)
+
+    # Remove any trailing semicolon from the query
+    sql_query = sql_query.rstrip(';').strip()
     
     return sql_query
 
