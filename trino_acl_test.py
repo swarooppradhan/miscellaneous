@@ -52,14 +52,26 @@ def get_trino_connection(host_url, user, password):
 def format_sql(sql_query):
     return sqlparse.format(sql_query, reindent=True, keyword_case='upper')
 
-# Function to replace variables in the SQL query
+# Dictionary to store variable values
+variable_values_cache = {}
+
+# Function to replace variables in the SQL query and remove any trailing semicolon
 def replace_variables_in_sql(sql_query):
+    # Find all variable placeholders in the format ##variable_name##
     variables = re.findall(r"##(.*?)##", sql_query)
     
     for var in variables:
-        value = input(f"Enter value for variable '{var}': ")
+        if var not in variable_values_cache:
+            # Prompt user to enter a value for each variable if not already cached
+            value = input(f"Enter value for variable '{var}': ")
+            variable_values_cache[var] = value
+        else:
+            # Use the cached value
+            value = variable_values_cache[var]
+        
+        # Replace the variable placeholder with the entered value in the query
         sql_query = sql_query.replace(f"##{var}##", value)
-
+    
     # Remove any trailing semicolon from the query
     sql_query = sql_query.rstrip(';').strip()
     
