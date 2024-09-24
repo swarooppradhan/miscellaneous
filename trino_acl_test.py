@@ -1,22 +1,25 @@
 import pandas as pd
 import trino
+from trino.auth import BasicAuthentication  # Import BasicAuthentication
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 import getpass
 import logging
 import datetime
 import sqlparse
-import re  # Import for handling regex
+import re
+import os  # Import for handling file paths
 
 # Function to set up logging with the desired log file name
-def setup_logging(team, env, timestamp):
-    log_filename = f"trino_test_log_{team or 'All'}_{env}_{timestamp}.log"
+def setup_logging(excel_directory, team, env, timestamp):
+    log_filename = f"trino_test_log_{team or 'All'}_{env}_{timestamp}.log".replace(' ', '_')
+    log_filepath = os.path.join(excel_directory, log_filename)
     logging.basicConfig(
-        filename=log_filename,
+        filename=log_filepath,
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
-    return log_filename
+    return log_filepath
 
 # Function to read the data from the Excel sheets
 def read_excel_data(file_path):
@@ -28,7 +31,6 @@ def read_excel_data(file_path):
 # Function to get passwords for unique users based on the selected environment
 def get_user_passwords(users_df, selected_env):
     user_passwords = {}
-    # Filter users based on the selected environment
     env_specific_users = users_df[users_df['Env'] == selected_env]
     
     for user in env_specific_users['User'].unique():
@@ -36,13 +38,13 @@ def get_user_passwords(users_df, selected_env):
         user_passwords[user] = password
     return user_passwords
 
-# Function to get Trino connection with HTTPS and port 443
+# Function to get Trino connection using BasicAuthentication
 def get_trino_connection(host_url, user, password):
     return trino.dbapi.connect(
         host=host_url,
         port=443,  # Using HTTPS port 443
         user=user,
-        password=password,
+        auth=BasicAuthentication(user, password),  # Use BasicAuthentication
         http_scheme='https'  # Use 'https' for secure connections
     )
 
@@ -52,13 +54,10 @@ def format_sql(sql_query):
 
 # Function to replace variables in the SQL query
 def replace_variables_in_sql(sql_query):
-    # Find all variable placeholders in the format ##variable_name##
     variables = re.findall(r"##(.*?)##", sql_query)
     
     for var in variables:
-        # Prompt user to enter a value for each variable
         value = input(f"Enter value for variable '{var}': ")
-        # Replace the variable placeholder with the entered value in the query
         sql_query = sql_query.replace(f"##{var}##", value)
     
     return sql_query
@@ -69,9 +68,8 @@ def execute_sql_with_trino(conn, sql_query):
         cursor = conn.cursor()
         cursor.execute(sql_query)
         
-        # Check if the query starts with SELECT, WITH, or SHOW
         if sql_query.strip().lower().startswith(('select', 'with', 'show')):
-            results = cursor.fetchall()  # Fetch results for SELECT, WITH, or SHOW queries
+            results = cursor.fetchall()
             logging.info(f"Query executed successfully: \n{format_sql(sql_query)}")
             return "COMPLETED", results
         else:
@@ -83,8 +81,9 @@ def execute_sql_with_trino(conn, sql_query):
         return "ERROR", str(e)
 
 # Function to generate the output filename
-def generate_output_filename(team, env, timestamp):
-    return f"trino_test_results_{team or 'All'}_{env}_{timestamp}.xlsx"
+def generate_output_filename(excel_directory, team, env, timestamp):
+    result_filename = f"trino_test_results_{team or 'All'}_{env}_{timestamp}.xlsx".replace(' ', '_')
+    return os.path.join(excel_directory, result_filename)
 
 # Function to save results to a new Excel file
 def save_results_to_new_excel(file_path, df, sheet_name='Test Cases'):
@@ -110,28 +109,22 @@ def apply_result_formatting(file_path, df, sheet_name='Test Cases'):
 
 # Function to get the team and environment selection
 def get_team_and_env_selection(test_cases_df, trino_env_df):
-    # Get the unique teams in alphabetical order
     teams = sorted(test_cases_df['Team'].unique())
     
-    # Display the teams as a numbered list
     print("Select the team for which test cases should be executed:")
     print("0. All")
     for idx, team in enumerate(teams, start=1):
         print(f"{idx}. {team}")
     
-    # Prompt user to select the team
     selected_team_option = int(input("Enter the number corresponding to your choice: "))
     selected_team = None if selected_team_option == 0 else teams[selected_team_option - 1]
 
-    # Get distinct environments in alphabetical order
     envs = sorted(trino_env_df['Env'].unique())
     
-    # Display the environments as a numbered list
     print("\nSelect the environment to be used:")
     for idx, env in enumerate(envs, start=1):
         print(f"{idx}. {env}")
 
-    # Prompt user to select the environment
     selected_env_option = int(input("Enter the number corresponding to your choice: "))
     selected_env = envs[selected_env_option - 1]
     
@@ -139,29 +132,26 @@ def get_team_and_env_selection(test_cases_df, trino_env_df):
 
 # Main function to process test cases
 def process_test_cases(file_path):
-    # Read data from Excel sheets
     test_cases_df, users_df, trino_env_df = read_excel_data(file_path)
+    
+    # Get the directory of the provided Excel file
+    excel_directory = os.path.dirname(file_path)
 
-    # Prompt user to select the team and environment
     selected_team, selected_env = get_team_and_env_selection(test_cases_df, trino_env_df)
 
-    # Filter test cases based on the selected team
     if selected_team:
         test_cases_df = test_cases_df[test_cases_df['Team'] == selected_team]
 
-    # Get passwords for unique users based on the selected environment
-    user_passwords = get_user_passwords(users_df, selected_env)
+    # Convert 'Actual Status' and 'Result' columns to object type to avoid dtype warning
+    test_cases_df['Actual Status'] = test_cases_df['Actual Status'].astype(object)
+    test_cases_df['Result'] = test_cases_df['Result'].astype(object)
 
-    # Get the current timestamp for filenames
+    user_passwords = get_user_passwords(users_df, selected_env)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Set up logging with the appropriate log filename
-    log_filename = setup_logging(selected_team, selected_env, timestamp)
-    
-    # Generate the output Excel filename
-    output_filename = generate_output_filename(selected_team, selected_env, timestamp)
+    log_filepath = setup_logging(excel_directory, selected_team, selected_env, timestamp)
+    output_filename = generate_output_filename(excel_directory, selected_team, selected_env, timestamp)
 
-    # Loop through each test case
     for index, test_case in test_cases_df.iterrows():
         test_case_number = test_case['Test Case Number']
         team = test_case['Team']
@@ -171,15 +161,12 @@ def process_test_cases(file_path):
         group = test_case['Group']
         use_case = test_case['Use Case']
 
-        # Log the current test case number, use case, and query being executed
         logging.info(f"Executing Test Case Number: {test_case_number}")
         logging.info(f"Use Case: {use_case}")
 
-        # Replace variables in the SQL query if present
         sql_query = replace_variables_in_sql(sql_query)
         logging.info(f"SQL query after variable replacement: \n{format_sql(sql_query)}")
 
-        # Get the correct host URL for the team, instance type, and selected environment
         trino_env_row = trino_env_df[
             (trino_env_df['Team'] == team) &
             (trino_env_df['Trino Instance Type'] == instance_type) &
@@ -193,9 +180,8 @@ def process_test_cases(file_path):
             continue
 
         host_url = trino_env_row.iloc[0]['Host URL']
-
-        # Identify the user based on the selected environment and group
         user_row = users_df[(users_df['Env'] == selected_env) & (users_df['Group'] == group)]
+        
         if user_row.empty:
             test_cases_df.at[index, 'Actual Status'] = 'ERROR'
             test_cases_df.at[index, 'Result'] = 'FAIL'
@@ -205,30 +191,22 @@ def process_test_cases(file_path):
         user = user_row.iloc[0]['User']
         password = user_passwords[user]
 
-        # Establish connection to Trino
         conn = get_trino_connection(host_url, user, password)
-
-        # Execute the SQL query and capture actual status
         actual_status, response = execute_sql_with_trino(conn, sql_query)
         test_cases_df.at[index, 'Actual Status'] = actual_status
 
-        # Log the response from the query execution
         logging.info(f"Response for Test Case Number {test_case_number}: {response}")
 
-        # Compare actual status with expected status and determine result
         if actual_status == expected_status:
             test_cases_df.at[index, 'Result'] = 'PASS'
         else:
             test_cases_df.at[index, 'Result'] = 'FAIL'
 
-    # Save the results to a new Excel file
     save_results_to_new_excel(output_filename, test_cases_df)
-
-    # Apply formatting based on results
     apply_result_formatting(output_filename, test_cases_df)
 
     print(f"Results have been saved to: {output_filename}")
-    print(f"Logs have been saved to: {log_filename}")
+    print(f"Logs have been saved to: {log_filepath}")
 
 # Example usage
 if __name__ == "__main__":
