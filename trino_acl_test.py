@@ -55,26 +55,26 @@ def format_sql(sql_query):
 # Dictionary to store variable values
 variable_values_cache = {}
 
-# Function to replace variables in the SQL query and remove any trailing semicolon
-def replace_variables_in_sql(sql_query):
-    # Find all variable placeholders in the format ##variable_name##
-    variables = re.findall(r"##(.*?)##", sql_query)
+# Function to collect variable values before starting test case execution
+def collect_variable_values(test_cases_df):
+    # Extract all unique variables from all SQL queries in the test cases
+    all_sql_queries = ' '.join(test_cases_df['SQL Query'].dropna().tolist())
+    variables = re.findall(r"##(.*?)##", all_sql_queries)
     
-    for var in variables:
+    # Prompt for each unique variable only once
+    unique_variables = set(variables)
+    for var in unique_variables:
         if var not in variable_values_cache:
-            # Prompt user to enter a value for each variable if not already cached
             value = input(f"Enter value for variable '{var}': ")
             variable_values_cache[var] = value
-        else:
-            # Use the cached value
-            value = variable_values_cache[var]
-        
-        # Replace the variable placeholder with the entered value in the query
+
+# Function to replace variables in a given SQL query using collected values and remove any trailing semicolon
+def replace_variables_in_sql(sql_query):
+    for var, value in variable_values_cache.items():
         sql_query = sql_query.replace(f"##{var}##", value)
     
     # Remove any trailing semicolon from the query
     sql_query = sql_query.rstrip(';').strip()
-    
     return sql_query
 
 # Function to execute SQL and return status
@@ -172,6 +172,9 @@ def process_test_cases(file_path):
     ordered_test_cases_df['Actual Status'] = ordered_test_cases_df['Actual Status'].astype(object)
     ordered_test_cases_df['Result'] = ordered_test_cases_df['Result'].astype(object)
 
+    # Collect all SQL variable values before execution
+    collect_variable_values(ordered_test_cases_df)
+
     user_passwords = get_user_passwords(users_df, selected_env)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -192,6 +195,7 @@ def process_test_cases(file_path):
         logging.info(f"Executing Test Case Number: {test_case_number} | Execution Type: {execution_type}")
         logging.info(f"Use Case: {use_case}")
 
+        # Replace variables in the SQL query using collected values
         sql_query = replace_variables_in_sql(sql_query)
         logging.info(f"SQL query after variable replacement: \n{format_sql(sql_query)}")
 
