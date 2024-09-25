@@ -177,9 +177,10 @@ def process_test_cases(file_path):
     # Combine all test cases in the correct order: Setup -> Test -> Clean up
     ordered_test_cases_df = pd.concat([setup_test_cases, test_cases_df, cleanup_test_cases], ignore_index=True)
 
-    # Convert 'Actual Status' and 'Result' columns to object type to avoid dtype warning
+    # Convert 'Actual Status', 'Result', and add 'Executed SQL' columns
     ordered_test_cases_df['Actual Status'] = ordered_test_cases_df['Actual Status'].astype(object)
     ordered_test_cases_df['Result'] = ordered_test_cases_df['Result'].astype(object)
+    ordered_test_cases_df['Executed SQL'] = ""  # Initialize an empty column for Executed SQL
 
     # Collect all SQL variable values before execution
     collect_variable_values(ordered_test_cases_df)
@@ -205,8 +206,11 @@ def process_test_cases(file_path):
         logging.info(f"Use Case: {use_case}")
 
         # Replace variables in the SQL query using collected values
-        sql_query = replace_variables_in_sql(sql_query)
-        logging.info(f"SQL query after variable replacement: \n{format_sql(sql_query)}")
+        executed_sql = replace_variables_in_sql(sql_query)
+        logging.info(f"SQL query after variable replacement: \n{format_sql(executed_sql)}")
+
+        # Save the actual executed SQL to the DataFrame
+        ordered_test_cases_df.at[index, 'Executed SQL'] = executed_sql
 
         trino_env_row = trino_env_df[
             (trino_env_df['Team'] == team) &
@@ -232,8 +236,10 @@ def process_test_cases(file_path):
         user = user_row.iloc[0]['User']
         password = user_passwords[user]
 
+        # Get or reuse an existing connection from the pool
         conn = get_or_create_trino_connection(host_url, user, password)
-        actual_status, response = execute_sql_with_trino(conn, sql_query)
+        
+        actual_status, response = execute_sql_with_trino(conn, executed_sql)
         ordered_test_cases_df.at[index, 'Actual Status'] = actual_status
 
         logging.info(f"Response for Test Case Number {test_case_number}: {response}")
@@ -248,7 +254,6 @@ def process_test_cases(file_path):
 
     print(f"Results have been saved to: {output_filename}")
     print(f"Logs have been saved to: {log_filepath}")
-
 
 # Example usage
 if __name__ == "__main__":
