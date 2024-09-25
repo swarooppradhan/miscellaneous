@@ -38,15 +38,24 @@ def get_user_passwords(users_df, selected_env):
         user_passwords[user] = password
     return user_passwords
 
-# Function to get Trino connection using BasicAuthentication
-def get_trino_connection(host_url, user, password):
-    return trino.dbapi.connect(
-        host=host_url,
-        port=443,  # Using HTTPS port 443
-        user=user,
-        auth=BasicAuthentication(user, password),  # Use BasicAuthentication
-        http_scheme='https'  # Use 'https' for secure connections
-    )
+# Dictionary to store reusable connections
+connection_pool = {}
+
+# Function to get or reuse a Trino connection using BasicAuthentication
+def get_or_create_trino_connection(host_url, user, password):
+    connection_key = (host_url, user)
+    
+    if connection_key not in connection_pool:
+        # Create a new connection if it doesn't exist in the pool
+        connection_pool[connection_key] = trino.dbapi.connect(
+            host=host_url,
+            port=443,  # Using HTTPS port 443
+            user=user,
+            auth=BasicAuthentication(user, password),  # Use BasicAuthentication
+            http_scheme='https'  # Use 'https' for secure connections
+        )
+        
+    return connection_pool[connection_key]
 
 # Function to pretty format the SQL query
 def format_sql(sql_query):
@@ -223,7 +232,7 @@ def process_test_cases(file_path):
         user = user_row.iloc[0]['User']
         password = user_passwords[user]
 
-        conn = get_trino_connection(host_url, user, password)
+        conn = get_or_create_trino_connection(host_url, user, password)
         actual_status, response = execute_sql_with_trino(conn, sql_query)
         ordered_test_cases_df.at[index, 'Actual Status'] = actual_status
 
