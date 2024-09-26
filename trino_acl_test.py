@@ -64,19 +64,29 @@ def format_sql(sql_query):
 # Dictionary to store variable values
 variable_values_cache = {}
 
-# Function to collect variable values before starting test case execution
-def collect_variable_values(test_cases_df):
+# Function to collect variable values from the "SQL Variables" sheet and prompt if not found
+def collect_variable_values(test_cases_df, sql_variables_df, selected_env):
     # Extract all unique variables from all SQL queries in the test cases
     all_sql_queries = ' '.join(test_cases_df['SQL Query'].dropna().tolist())
     variables = re.findall(r"##(.*?)##", all_sql_queries)
     
-    # Prompt for each unique variable only once
+    # Get values for the selected environment from the SQL Variables sheet
+    env_variable_values = sql_variables_df[sql_variables_df['Env'] == selected_env]
+
+    # Prompt for each unique variable only once if not found in the SQL Variables sheet
     unique_variables = set(variables)
     for var in unique_variables:
-        if var not in variable_values_cache:
+        # Check if the variable exists in the SQL Variables sheet for the selected environment
+        var_value_row = env_variable_values[env_variable_values['Variable'] == var]
+        
+        if not var_value_row.empty:
+            value = var_value_row.iloc[0]['Value']
+            variable_values_cache[var] = value  # Store the value in the cache
+        elif var not in variable_values_cache:
+            # Prompt user to enter a value for each variable if not already cached
             value = input(f"Enter value for variable '{var}': ")
             variable_values_cache[var] = value
-
+            
 # Function to replace variables in a given SQL query using collected values and remove any trailing semicolon
 def replace_variables_in_sql(sql_query):
     for var, value in variable_values_cache.items():
@@ -161,6 +171,7 @@ failed_connections = set()
 def process_test_cases(file_path):
     # Read data from Excel sheets
     test_cases_df, users_df, trino_env_df = read_excel_data(file_path)
+    sql_variables_df = pd.read_excel(file_path, sheet_name='SQL Variables')
     
     # Get the directory of the provided Excel file
     excel_directory = os.path.dirname(file_path)
@@ -191,7 +202,7 @@ def process_test_cases(file_path):
     ordered_test_cases_df['Error Message'] = ""  # Initialize an empty column for Error Messages
 
     # Collect all SQL variable values before execution
-    collect_variable_values(ordered_test_cases_df)
+    collect_variable_values(ordered_test_cases_df, sql_variables_df, selected_env)
 
     user_passwords = get_user_passwords(users_df, selected_env)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -289,7 +300,6 @@ def process_test_cases(file_path):
 
     print(f"Results have been saved to: {output_filename}")
     print(f"Logs have been saved to: {log_filepath}")
-
 # Example usage
 if __name__ == "__main__":
     excel_file_path = input("Please provide the Excel file path: ")
