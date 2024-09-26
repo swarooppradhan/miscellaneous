@@ -154,6 +154,9 @@ def get_team_and_env_selection(test_cases_df, trino_env_df):
     
     return selected_team, selected_env
 
+# Dictionary to keep track of failed connections
+failed_connections = set()
+
 # Main function to process test cases
 def process_test_cases(file_path):
     # Read data from Excel sheets
@@ -239,16 +242,28 @@ def process_test_cases(file_path):
         user = user_row.iloc[0]['User']
         password = user_passwords[user]
 
+        # Check if this user and host URL combination has already failed
+        connection_key = (host_url, user)
+        if connection_key in failed_connections:
+            ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
+            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
+            ordered_test_cases_df.at[index, 'Error Message'] = 'Previous connection attempt failed for this user and host URL'
+            logging.info(f"Skipping Test Case Number {test_case_number} due to prior connection failure for Host URL: {host_url} and User: {user}")
+            continue
+
         try:
             # Attempt to get or reuse an existing connection from the pool
             conn = get_or_create_trino_connection(host_url, user, password)
         except Exception as e:
-            # If connection fails, capture the error and proceed with the next test case
+            # If connection fails, capture the error, mark this combination as failed, and proceed with the next test case
             error_message = f"Connection failed: {str(e)}"
             ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
             ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
             ordered_test_cases_df.at[index, 'Error Message'] = error_message
             logging.info(f"Failed to connect for Test Case Number {test_case_number}: {error_message}")
+            
+            # Add this host URL and user combination to the failed_connections set
+            failed_connections.add(connection_key)
             continue
         
         actual_status, response = execute_sql_with_trino(conn, executed_sql)
