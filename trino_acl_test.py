@@ -239,8 +239,17 @@ def process_test_cases(file_path):
         user = user_row.iloc[0]['User']
         password = user_passwords[user]
 
-        # Get or reuse an existing connection from the pool
-        conn = get_or_create_trino_connection(host_url, user, password)
+        try:
+            # Attempt to get or reuse an existing connection from the pool
+            conn = get_or_create_trino_connection(host_url, user, password)
+        except Exception as e:
+            # If connection fails, capture the error and proceed with the next test case
+            error_message = f"Connection failed: {str(e)}"
+            ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
+            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
+            ordered_test_cases_df.at[index, 'Error Message'] = error_message
+            logging.info(f"Failed to connect for Test Case Number {test_case_number}: {error_message}")
+            continue
         
         actual_status, response = execute_sql_with_trino(conn, executed_sql)
         ordered_test_cases_df.at[index, 'Actual Status'] = actual_status
