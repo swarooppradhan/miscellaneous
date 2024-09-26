@@ -12,9 +12,12 @@ import os
 import time
 import threading
 
+# Global flag to indicate when the execution is complete
+execution_complete = False
+
 # Function to display the execution summary
 def display_summary(ordered_test_cases_df, total_test_cases):
-    while True:
+    while not execution_complete:
         executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()]
         passed_cases = executed_cases[executed_cases['Result'] == 'PASS']
         failed_cases = executed_cases[executed_cases['Result'] == 'FAIL']
@@ -27,6 +30,19 @@ def display_summary(ordered_test_cases_df, total_test_cases):
         print("="*50 + "\n")
         
         time.sleep(60)  # Refresh every 1 minute
+
+    # Print the final summary once all test cases are executed
+    executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()]
+    passed_cases = executed_cases[executed_cases['Result'] == 'PASS']
+    failed_cases = executed_cases[executed_cases['Result'] == 'FAIL']
+
+    print("\n" + "="*50)
+    print("Final Summary")
+    print(f"Total Test Cases: {total_test_cases}")
+    print(f"Executed Test Cases: {len(executed_cases)}")
+    print(f"Passed Test Cases: {len(passed_cases)}")
+    print(f"Failed Test Cases: {len(failed_cases)}")
+    print("="*50 + "\n")
 
 # Function to set up logging with the desired log file name
 def setup_logging(excel_directory, team, env, timestamp):
@@ -187,6 +203,8 @@ failed_connections = set()
 
 # Main function to process test cases
 def process_test_cases(file_path):
+    global execution_complete  # Use the global execution_complete flag
+
     # Read data from Excel sheets
     test_cases_df, users_df, trino_env_df = read_excel_data(file_path)
     sql_variables_df = pd.read_excel(file_path, sheet_name='SQL Variables')
@@ -318,6 +336,11 @@ def process_test_cases(file_path):
             ordered_test_cases_df.at[index, 'Result'] = 'PASS'
         else:
             ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
+
+    # Mark the execution as complete
+    execution_complete = True
+    # Wait for the summary thread to complete
+    summary_thread.join()
 
     save_results_to_new_excel(output_filename, ordered_test_cases_df)
     apply_result_formatting(output_filename, ordered_test_cases_df)
