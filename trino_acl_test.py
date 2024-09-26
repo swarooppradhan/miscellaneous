@@ -210,7 +210,6 @@ def get_selected_env(trino_env_df):
     
     return selected_env
 
-# Function to execute test cases for a given set of test cases with thread name logging
 def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, execution_type):
     current_thread = threading.current_thread().name  # Get the current thread's name
 
@@ -328,7 +327,7 @@ def process_test_cases(file_path):
     # Combine all test cases in the correct order: Setup -> Test -> Clean up
     ordered_test_cases_df = pd.concat([setup_test_cases, team_test_cases_df, cleanup_test_cases], ignore_index=True)
 
-    # Convert 'Actual Status', 'Result', add 'Executed SQL' and 'Error Message' columns
+    # Explicitly set 'Actual Status' and 'Result' columns to object dtype
     ordered_test_cases_df['Actual Status'] = ordered_test_cases_df['Actual Status'].astype(object)
     ordered_test_cases_df['Result'] = ordered_test_cases_df['Result'].astype(object)
     ordered_test_cases_df['Executed SQL'] = ""  # Initialize an empty column for Executed SQL
@@ -345,17 +344,17 @@ def process_test_cases(file_path):
     log_filepath = setup_logging(excel_directory, ','.join(selected_teams), selected_env, timestamp)
     output_filename = generate_output_filename(excel_directory, ','.join(selected_teams), selected_env, timestamp)
 
-    # Execute the "Setup" test cases
-    execute_test_cases(setup_test_cases, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Setup")
-
     # Start the summary display thread
     summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
     summary_thread.start()
 
+    # Execute the "Setup" test cases
+    execute_test_cases(ordered_test_cases_df[ordered_test_cases_df['Execution Type'] == 'Setup'], trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Setup")
+
     # Execute test cases for each selected team in parallel
     team_threads = []
     for team in selected_teams:
-        team_specific_df = team_test_cases_df[team_test_cases_df['Team'] == team]
+        team_specific_df = ordered_test_cases_df[(ordered_test_cases_df['Execution Type'] == 'Test') & (ordered_test_cases_df['Team'] == team)]
         team_thread = threading.Thread(
             target=execute_test_cases, 
             args=(team_specific_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Test"),
@@ -369,7 +368,7 @@ def process_test_cases(file_path):
         thread.join()
 
     # Execute the "Clean up" test cases after all team test cases are finished
-    execute_test_cases(cleanup_test_cases, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Clean up")
+    execute_test_cases(ordered_test_cases_df[ordered_test_cases_df['Execution Type'] == 'Clean up'], trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Clean up")
 
     # Write the results to the Excel file first
     save_results_to_new_excel(output_filename, ordered_test_cases_df)
