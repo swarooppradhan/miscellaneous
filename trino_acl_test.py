@@ -11,6 +11,7 @@ import re
 import os
 import time
 import threading
+from collections import defaultdict
 
 # Global flag to indicate when the execution is complete
 execution_complete = False
@@ -20,34 +21,40 @@ connection_pool = {}
 variable_values_cache = {}
 # Dictionary to keep track of failed connections
 failed_connections = set()
+# A lock to ensure thread-safe updates
+data_lock = threading.Lock()
+# Dictionary to keep track of test execution status
+execution_summary = defaultdict(lambda: {'executed': 0, 'passed': 0, 'failed': 0})
 
 # Function to display the execution summary
-def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
+def display_summary(total_test_cases, refresh_frequency):
     while not execution_complete:
-        executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()]
-        passed_cases = executed_cases[executed_cases['Result'] == 'PASS']
-        failed_cases = executed_cases[executed_cases['Result'] == 'FAIL']
+        with data_lock:
+            executed_cases = sum([entry['executed'] for entry in execution_summary.values()])
+            passed_cases = sum([entry['passed'] for entry in execution_summary.values()])
+            failed_cases = sum([entry['failed'] for entry in execution_summary.values()])
 
         print("\n" + "="*50)
         print(f"Total Test Cases: {total_test_cases}")
-        print(f"Executed Test Cases: {len(executed_cases)}")
-        print(f"Passed Test Cases: {len(passed_cases)}")
-        print(f"Failed Test Cases: {len(failed_cases)}")
+        print(f"Executed Test Cases: {executed_cases}")
+        print(f"Passed Test Cases: {passed_cases}")
+        print(f"Failed Test Cases: {failed_cases}")
         print("="*50 + "\n")
         
         time.sleep(refresh_frequency * 60)  # Refresh based on user-defined frequency
 
-    # Print the final summary once all test cases are executed
-    executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()]
-    passed_cases = executed_cases[executed_cases['Result'] == 'PASS']
-    failed_cases = executed_cases[executed_cases['Result'] == 'FAIL']
+    # Final summary
+    with data_lock:
+        executed_cases = sum([entry['executed'] for entry in execution_summary.values()])
+        passed_cases = sum([entry['passed'] for entry in execution_summary.values()])
+        failed_cases = sum([entry['failed'] for entry in execution_summary.values()])
 
-    print("\n" + "="*50)
-    print("Final Summary")
+    print("\nFinal Summary")
+    print("="*50)
     print(f"Total Test Cases: {total_test_cases}")
-    print(f"Executed Test Cases: {len(executed_cases)}")
-    print(f"Passed Test Cases: {len(passed_cases)}")
-    print(f"Failed Test Cases: {len(failed_cases)}")
+    print(f"Executed Test Cases: {executed_cases}")
+    print(f"Passed Test Cases: {passed_cases}")
+    print(f"Failed Test Cases: {failed_cases}")
     print("="*50 + "\n")
 
 # Function to set up logging with the desired log file name
@@ -210,7 +217,7 @@ def get_selected_env(trino_env_df):
     
     return selected_env
 
-def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, execution_type):
+def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, execution_type):
     current_thread = threading.current_thread().name  # Get the current thread's name
 
     for index, test_case in test_cases_df.iterrows():
@@ -229,7 +236,6 @@ def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user
         executed_sql = replace_variables_in_sql(sql_query)
         logging.info(f"[{current_thread}] SQL query after variable replacement: \n{format_sql(executed_sql)}")
 
-        # Save the actual executed SQL using .loc to avoid SettingWithCopyWarning
         test_cases_df.loc[index, 'Executed SQL'] = executed_sql
 
         trino_env_row = trino_env_df[
@@ -243,6 +249,9 @@ def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user
             test_cases_df.loc[index, 'Result'] = 'FAIL'
             test_cases_df.loc[index, 'Error Message'] = 'Host URL not found'
             logging.info(f"[{current_thread}] Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
+            with data_lock:
+                execution_summary[current_thread]['executed'] += 1
+                execution_summary[current_thread]['failed'] += 1
             continue
 
         host_url = trino_env_row.iloc[0]['Host URL']
@@ -253,48 +262,55 @@ def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user
             test_cases_df.loc[index, 'Result'] = 'FAIL'
             test_cases_df.loc[index, 'Error Message'] = 'User not found'
             logging.info(f"[{current_thread}] User not found for Group: {group} in Environment: {selected_env}")
+            with data_lock:
+                execution_summary[current_thread]['executed'] += 1
+                execution_summary[current_thread]['failed'] += 1
             continue
 
         user = user_row.iloc[0]['User']
         password = user_passwords[user]
 
-        # Check if this user and host URL combination has already failed
         connection_key = (host_url, user)
         if connection_key in failed_connections:
             test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
             test_cases_df.loc[index, 'Result'] = 'FAIL'
             test_cases_df.loc[index, 'Error Message'] = 'Previous connection attempt failed for this user and host URL'
             logging.info(f"[{current_thread}] Skipping Test Case Number {test_case_number} due to prior connection failure for Host URL: {host_url} and User: {user}")
+            with data_lock:
+                execution_summary[current_thread]['executed'] += 1
+                execution_summary[current_thread]['failed'] += 1
             continue
 
         try:
-            # Attempt to get or reuse an existing connection from the pool
             conn = get_or_create_trino_connection(host_url, user, password)
         except Exception as e:
-            # If connection fails, capture the error, mark this combination as failed, and proceed with the next test case
             error_message = f"Connection failed: {str(e)}"
             test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
             test_cases_df.loc[index, 'Result'] = 'FAIL'
             test_cases_df.loc[index, 'Error Message'] = error_message
             logging.info(f"[{current_thread}] Failed to connect for Test Case Number {test_case_number}: {error_message}")
-            
-            # Add this host URL and user combination to the failed_connections set
             failed_connections.add(connection_key)
+            with data_lock:
+                execution_summary[current_thread]['executed'] += 1
+                execution_summary[current_thread]['failed'] += 1
             continue
         
         actual_status, response = execute_sql_with_trino(conn, executed_sql)
         test_cases_df.loc[index, 'Actual Status'] = actual_status
 
-        # Capture the error message in the "Error Message" column if execution failed
         if actual_status == 'ERROR':
             test_cases_df.loc[index, 'Error Message'] = response
         
         logging.info(f"[{current_thread}] Response for Test Case Number {test_case_number}: {response}")
 
-        if actual_status == expected_status:
-            test_cases_df.loc[index, 'Result'] = 'PASS'
-        else:
-            test_cases_df.loc[index, 'Result'] = 'FAIL'
+        with data_lock:
+            execution_summary[current_thread]['executed'] += 1
+            if actual_status == expected_status:
+                execution_summary[current_thread]['passed'] += 1
+                test_cases_df.loc[index, 'Result'] = 'PASS'
+            else:
+                execution_summary[current_thread]['failed'] += 1
+                test_cases_df.loc[index, 'Result'] = 'FAIL'
 
 def process_test_cases(file_path):
     global execution_complete  # Use the global execution_complete flag
@@ -345,11 +361,11 @@ def process_test_cases(file_path):
     output_filename = generate_output_filename(excel_directory, ','.join(selected_teams), selected_env, timestamp)
 
     # Start the summary display thread
-    summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
+    summary_thread = threading.Thread(target=display_summary, args=(total_test_cases, refresh_frequency), daemon=True)
     summary_thread.start()
 
     # Execute the "Setup" test cases
-    execute_test_cases(ordered_test_cases_df[ordered_test_cases_df['Execution Type'] == 'Setup'], trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Setup")
+    execute_test_cases(ordered_test_cases_df[ordered_test_cases_df['Execution Type'] == 'Setup'], trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, "Setup")
 
     # Execute test cases for each selected team in parallel
     team_threads = []
@@ -357,7 +373,7 @@ def process_test_cases(file_path):
         team_specific_df = ordered_test_cases_df[(ordered_test_cases_df['Execution Type'] == 'Test') & (ordered_test_cases_df['Team'] == team)]
         team_thread = threading.Thread(
             target=execute_test_cases, 
-            args=(team_specific_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Test"),
+            args=(team_specific_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, "Test"),
             name=f"Team-{team}"
         )
         team_threads.append(team_thread)
@@ -368,7 +384,7 @@ def process_test_cases(file_path):
         thread.join()
 
     # Execute the "Clean up" test cases after all team test cases are finished
-    execute_test_cases(ordered_test_cases_df[ordered_test_cases_df['Execution Type'] == 'Clean up'], trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Clean up")
+    execute_test_cases(ordered_test_cases_df[ordered_test_cases_df['Execution Type'] == 'Clean up'], trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, "Clean up")
 
     # Write the results to the Excel file first
     save_results_to_new_excel(output_filename, ordered_test_cases_df)
