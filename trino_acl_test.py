@@ -210,6 +210,7 @@ def get_selected_env(trino_env_df):
     
     return selected_env
 
+# Function to execute test cases for a given set of test cases with thread name logging
 def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, execution_type):
     current_thread = threading.current_thread().name  # Get the current thread's name
 
@@ -229,8 +230,8 @@ def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user
         executed_sql = replace_variables_in_sql(sql_query)
         logging.info(f"[{current_thread}] SQL query after variable replacement: \n{format_sql(executed_sql)}")
 
-        # Save the actual executed SQL to the DataFrame
-        test_cases_df.at[index, 'Executed SQL'] = executed_sql
+        # Save the actual executed SQL using .loc to avoid SettingWithCopyWarning
+        test_cases_df.loc[index, 'Executed SQL'] = executed_sql
 
         trino_env_row = trino_env_df[
             (trino_env_df['Team'] == team) &
@@ -239,9 +240,9 @@ def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user
         ]
 
         if trino_env_row.empty:
-            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            test_cases_df.at[index, 'Result'] = 'FAIL'
-            test_cases_df.at[index, 'Error Message'] = 'Host URL not found'
+            test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
+            test_cases_df.loc[index, 'Result'] = 'FAIL'
+            test_cases_df.loc[index, 'Error Message'] = 'Host URL not found'
             logging.info(f"[{current_thread}] Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
             continue
 
@@ -249,9 +250,9 @@ def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user
         user_row = users_df[(users_df['Env'] == selected_env) & (users_df['Group'] == group)]
         
         if user_row.empty:
-            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            test_cases_df.at[index, 'Result'] = 'FAIL'
-            test_cases_df.at[index, 'Error Message'] = 'User not found'
+            test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
+            test_cases_df.loc[index, 'Result'] = 'FAIL'
+            test_cases_df.loc[index, 'Error Message'] = 'User not found'
             logging.info(f"[{current_thread}] User not found for Group: {group} in Environment: {selected_env}")
             continue
 
@@ -261,9 +262,9 @@ def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user
         # Check if this user and host URL combination has already failed
         connection_key = (host_url, user)
         if connection_key in failed_connections:
-            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            test_cases_df.at[index, 'Result'] = 'FAIL'
-            test_cases_df.at[index, 'Error Message'] = 'Previous connection attempt failed for this user and host URL'
+            test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
+            test_cases_df.loc[index, 'Result'] = 'FAIL'
+            test_cases_df.loc[index, 'Error Message'] = 'Previous connection attempt failed for this user and host URL'
             logging.info(f"[{current_thread}] Skipping Test Case Number {test_case_number} due to prior connection failure for Host URL: {host_url} and User: {user}")
             continue
 
@@ -273,9 +274,9 @@ def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user
         except Exception as e:
             # If connection fails, capture the error, mark this combination as failed, and proceed with the next test case
             error_message = f"Connection failed: {str(e)}"
-            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            test_cases_df.at[index, 'Result'] = 'FAIL'
-            test_cases_df.at[index, 'Error Message'] = error_message
+            test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
+            test_cases_df.loc[index, 'Result'] = 'FAIL'
+            test_cases_df.loc[index, 'Error Message'] = error_message
             logging.info(f"[{current_thread}] Failed to connect for Test Case Number {test_case_number}: {error_message}")
             
             # Add this host URL and user combination to the failed_connections set
@@ -283,18 +284,18 @@ def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user
             continue
         
         actual_status, response = execute_sql_with_trino(conn, executed_sql)
-        test_cases_df.at[index, 'Actual Status'] = actual_status
+        test_cases_df.loc[index, 'Actual Status'] = actual_status
 
         # Capture the error message in the "Error Message" column if execution failed
         if actual_status == 'ERROR':
-            test_cases_df.at[index, 'Error Message'] = response
+            test_cases_df.loc[index, 'Error Message'] = response
         
         logging.info(f"[{current_thread}] Response for Test Case Number {test_case_number}: {response}")
 
         if actual_status == expected_status:
-            test_cases_df.at[index, 'Result'] = 'PASS'
+            test_cases_df.loc[index, 'Result'] = 'PASS'
         else:
-            test_cases_df.at[index, 'Result'] = 'FAIL'
+            test_cases_df.loc[index, 'Result'] = 'FAIL'
 
 def process_test_cases(file_path):
     global execution_complete  # Use the global execution_complete flag
