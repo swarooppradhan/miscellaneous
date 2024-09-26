@@ -171,11 +171,15 @@ def process_test_cases(file_path):
     setup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Setup']
     cleanup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Clean up']
     
-    # Select only the 'Test' test cases for the selected team
-    test_cases_df = test_cases_df[
-        (test_cases_df['Execution Type'] == 'Test') & 
-        (test_cases_df['Team'] == selected_team)
-    ]
+    # Select only the 'Test' test cases for the selected team, or all if 'All' was selected
+    if selected_team:
+        test_cases_df = test_cases_df[
+            (test_cases_df['Execution Type'] == 'Test') & 
+            (test_cases_df['Team'] == selected_team)
+        ]
+    else:
+        # If 'All' is selected, include all 'Test' test cases
+        test_cases_df = test_cases_df[test_cases_df['Execution Type'] == 'Test']
 
     # Combine all test cases in the correct order: Setup -> Test -> Clean up
     ordered_test_cases_df = pd.concat([setup_test_cases, test_cases_df, cleanup_test_cases], ignore_index=True)
