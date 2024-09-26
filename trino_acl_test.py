@@ -211,6 +211,8 @@ def get_selected_env(trino_env_df):
     return selected_team, selected_env
 
 def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variables_df, log_filepath, execution_type):
+    current_thread = threading.current_thread().name  # Get the current thread's name
+
     for index, test_case in test_cases_df.iterrows():
         test_case_number = test_case['Test Case Number']
         team = test_case['Team']
@@ -220,12 +222,12 @@ def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variable
         group = test_case['Group']
         use_case = test_case['Use Case']
 
-        logging.info(f"Executing {execution_type} Test Case Number: {test_case_number} | Team: {team}")
-        logging.info(f"Use Case: {use_case}")
+        logging.info(f"[{current_thread}] Executing {execution_type} Test Case Number: {test_case_number} | Team: {team}")
+        logging.info(f"[{current_thread}] Use Case: {use_case}")
 
         # Replace variables in the SQL query using collected values
         executed_sql = replace_variables_in_sql(sql_query)
-        logging.info(f"SQL query after variable replacement: \n{format_sql(executed_sql)}")
+        logging.info(f"[{current_thread}] SQL query after variable replacement: \n{format_sql(executed_sql)}")
 
         # Save the actual executed SQL to the DataFrame
         test_cases_df.at[index, 'Executed SQL'] = executed_sql
@@ -240,7 +242,7 @@ def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variable
             test_cases_df.at[index, 'Actual Status'] = 'ERROR'
             test_cases_df.at[index, 'Result'] = 'FAIL'
             test_cases_df.at[index, 'Error Message'] = 'Host URL not found'
-            logging.info(f"Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
+            logging.info(f"[{current_thread}] Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
             continue
 
         host_url = trino_env_row.iloc[0]['Host URL']
@@ -250,7 +252,7 @@ def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variable
             test_cases_df.at[index, 'Actual Status'] = 'ERROR'
             test_cases_df.at[index, 'Result'] = 'FAIL'
             test_cases_df.at[index, 'Error Message'] = 'User not found'
-            logging.info(f"User not found for Group: {group} in Environment: {selected_env}")
+            logging.info(f"[{current_thread}] User not found for Group: {group} in Environment: {selected_env}")
             continue
 
         user = user_row.iloc[0]['User']
@@ -262,7 +264,7 @@ def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variable
             test_cases_df.at[index, 'Actual Status'] = 'ERROR'
             test_cases_df.at[index, 'Result'] = 'FAIL'
             test_cases_df.at[index, 'Error Message'] = 'Previous connection attempt failed for this user and host URL'
-            logging.info(f"Skipping Test Case Number {test_case_number} due to prior connection failure for Host URL: {host_url} and User: {user}")
+            logging.info(f"[{current_thread}] Skipping Test Case Number {test_case_number} due to prior connection failure for Host URL: {host_url} and User: {user}")
             continue
 
         try:
@@ -274,7 +276,7 @@ def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variable
             test_cases_df.at[index, 'Actual Status'] = 'ERROR'
             test_cases_df.at[index, 'Result'] = 'FAIL'
             test_cases_df.at[index, 'Error Message'] = error_message
-            logging.info(f"Failed to connect for Test Case Number {test_case_number}: {error_message}")
+            logging.info(f"[{current_thread}] Failed to connect for Test Case Number {test_case_number}: {error_message}")
             
             # Add this host URL and user combination to the failed_connections set
             failed_connections.add(connection_key)
@@ -287,7 +289,7 @@ def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variable
         if actual_status == 'ERROR':
             test_cases_df.at[index, 'Error Message'] = response
         
-        logging.info(f"Response for Test Case Number {test_case_number}: {response}")
+        logging.info(f"[{current_thread}] Response for Test Case Number {test_case_number}: {response}")
 
         if actual_status == expected_status:
             test_cases_df.at[index, 'Result'] = 'PASS'
@@ -354,7 +356,11 @@ def process_test_cases(file_path):
     team_threads = []
     for team in selected_teams:
         team_specific_df = team_test_cases_df[team_test_cases_df['Team'] == team]
-        team_thread = threading.Thread(target=execute_test_cases, args=(team_specific_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Test"))
+        team_thread = threading.Thread(
+            target=execute_test_cases, 
+            args=(team_specific_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Test"),
+            name=f"Team-{team}"
+        )
         team_threads.append(team_thread)
         team_thread.start()
 
