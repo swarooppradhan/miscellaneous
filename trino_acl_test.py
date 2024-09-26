@@ -210,7 +210,7 @@ def get_selected_env(trino_env_df):
     
     return selected_env
 
-def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variables_df, log_filepath, execution_type):
+def execute_test_cases(test_cases_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, execution_type):
     current_thread = threading.current_thread().name  # Get the current thread's name
 
     for index, test_case in test_cases_df.iterrows():
@@ -296,7 +296,6 @@ def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variable
         else:
             test_cases_df.at[index, 'Result'] = 'FAIL'
 
-# Main function to process test cases
 def process_test_cases(file_path):
     global execution_complete  # Use the global execution_complete flag
 
@@ -346,7 +345,7 @@ def process_test_cases(file_path):
     output_filename = generate_output_filename(excel_directory, ','.join(selected_teams), selected_env, timestamp)
 
     # Execute the "Setup" test cases
-    execute_test_cases(setup_test_cases, selected_env, user_passwords, sql_variables_df, log_filepath, "Setup")
+    execute_test_cases(setup_test_cases, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Setup")
 
     # Start the summary display thread
     summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
@@ -358,7 +357,7 @@ def process_test_cases(file_path):
         team_specific_df = team_test_cases_df[team_test_cases_df['Team'] == team]
         team_thread = threading.Thread(
             target=execute_test_cases, 
-            args=(team_specific_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Test"),
+            args=(team_specific_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Test"),
             name=f"Team-{team}"
         )
         team_threads.append(team_thread)
@@ -369,7 +368,7 @@ def process_test_cases(file_path):
         thread.join()
 
     # Execute the "Clean up" test cases after all team test cases are finished
-    execute_test_cases(cleanup_test_cases, selected_env, user_passwords, sql_variables_df, log_filepath, "Clean up")
+    execute_test_cases(cleanup_test_cases, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Clean up")
 
     # Write the results to the Excel file first
     save_results_to_new_excel(output_filename, ordered_test_cases_df)
