@@ -240,12 +240,6 @@ def process_test_cases(file_path):
     ordered_test_cases_df['Executed SQL'] = ""  # Initialize an empty column for Executed SQL
     ordered_test_cases_df['Error Message'] = ""  # Initialize an empty column for Error Messages
 
-    total_test_cases = len(ordered_test_cases_df)
-
-    # Start the summary display thread
-    summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
-    summary_thread.start()
-
     # Collect all SQL variable values before execution
     collect_variable_values(ordered_test_cases_df, sql_variables_df, selected_env)
 
@@ -254,6 +248,11 @@ def process_test_cases(file_path):
 
     log_filepath = setup_logging(excel_directory, selected_team, selected_env, timestamp)
     output_filename = generate_output_filename(excel_directory, selected_team, selected_env, timestamp)
+    total_test_cases = len(ordered_test_cases_df)
+
+    # Start the summary display thread
+    summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
+    summary_thread.start()
 
     # Execute each test case in the ordered list
     for index, test_case in ordered_test_cases_df.iterrows():
