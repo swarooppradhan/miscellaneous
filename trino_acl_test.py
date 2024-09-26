@@ -208,7 +208,7 @@ def get_selected_env(trino_env_df):
     selected_env_option = int(input("Enter the number corresponding to your choice: "))
     selected_env = envs[selected_env_option - 1]
     
-    return selected_team, selected_env
+    return selected_env
 
 def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variables_df, log_filepath, execution_type):
     current_thread = threading.current_thread().name  # Get the current thread's name
