@@ -177,10 +177,11 @@ def process_test_cases(file_path):
     # Combine all test cases in the correct order: Setup -> Test -> Clean up
     ordered_test_cases_df = pd.concat([setup_test_cases, test_cases_df, cleanup_test_cases], ignore_index=True)
 
-    # Convert 'Actual Status', 'Result', and add 'Executed SQL' columns
+    # Convert 'Actual Status', 'Result', add 'Executed SQL' and 'Error Message' columns
     ordered_test_cases_df['Actual Status'] = ordered_test_cases_df['Actual Status'].astype(object)
     ordered_test_cases_df['Result'] = ordered_test_cases_df['Result'].astype(object)
     ordered_test_cases_df['Executed SQL'] = ""  # Initialize an empty column for Executed SQL
+    ordered_test_cases_df['Error Message'] = ""  # Initialize an empty column for Error Messages
 
     # Collect all SQL variable values before execution
     collect_variable_values(ordered_test_cases_df)
@@ -221,7 +222,8 @@ def process_test_cases(file_path):
         if trino_env_row.empty:
             ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
             ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
-            logging.error(f"Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
+            ordered_test_cases_df.at[index, 'Error Message'] = 'Host URL not found'
+            logging.info(f"Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
             continue
 
         host_url = trino_env_row.iloc[0]['Host URL']
@@ -230,7 +232,8 @@ def process_test_cases(file_path):
         if user_row.empty:
             ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
             ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
-            logging.error(f"User not found for Group: {group} in Environment: {selected_env}")
+            ordered_test_cases_df.at[index, 'Error Message'] = 'User not found'
+            logging.info(f"User not found for Group: {group} in Environment: {selected_env}")
             continue
 
         user = user_row.iloc[0]['User']
@@ -242,6 +245,10 @@ def process_test_cases(file_path):
         actual_status, response = execute_sql_with_trino(conn, executed_sql)
         ordered_test_cases_df.at[index, 'Actual Status'] = actual_status
 
+        # Capture the error message in the "Error Message" column if execution failed
+        if actual_status == 'ERROR':
+            ordered_test_cases_df.at[index, 'Error Message'] = response
+        
         logging.info(f"Response for Test Case Number {test_case_number}: {response}")
 
         if actual_status == expected_status:
