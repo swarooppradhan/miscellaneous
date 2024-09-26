@@ -11,7 +11,6 @@ import re
 import os
 import time
 import threading
-from collections import defaultdict
 
 # Global flag to indicate when the execution is complete
 execution_complete = False
@@ -23,16 +22,14 @@ variable_values_cache = {}
 failed_connections = set()
 # A lock to ensure thread-safe updates
 data_lock = threading.Lock()
-# Dictionary to keep track of test execution status
-execution_summary = defaultdict(lambda: {'executed': 0, 'passed': 0, 'failed': 0})
 
 # Function to display the execution summary
-def display_summary(total_test_cases, refresh_frequency):
+def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
     while not execution_complete:
         with data_lock:
-            executed_cases = sum([entry['executed'] for entry in execution_summary.values()])
-            passed_cases = sum([entry['passed'] for entry in execution_summary.values()])
-            failed_cases = sum([entry['failed'] for entry in execution_summary.values()])
+            executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()].shape[0]
+            passed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'PASS'].shape[0]
+            failed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'FAIL'].shape[0]
 
         print("\n" + "="*50)
         print(f"Total Test Cases: {total_test_cases}")
@@ -43,11 +40,11 @@ def display_summary(total_test_cases, refresh_frequency):
         
         time.sleep(refresh_frequency * 60)  # Refresh based on user-defined frequency
 
-    # Final summary
+    # Final summary once execution is complete
     with data_lock:
-        executed_cases = sum([entry['executed'] for entry in execution_summary.values()])
-        passed_cases = sum([entry['passed'] for entry in execution_summary.values()])
-        failed_cases = sum([entry['failed'] for entry in execution_summary.values()])
+        executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()].shape[0]
+        passed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'PASS'].shape[0]
+        failed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'FAIL'].shape[0]
 
     print("\nFinal Summary")
     print("="*50)
@@ -358,14 +355,14 @@ def process_test_cases(file_path):
     output_filename = generate_output_filename(excel_directory, ','.join(selected_teams), selected_env, timestamp)
 
     # Start the summary display thread
-    summary_thread = threading.Thread(target=display_summary, args=(total_test_cases, refresh_frequency), daemon=True)
+    summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
     summary_thread.start()
 
     # Execute setup test cases
     execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, "Setup")
 
-    team_threads = []
     # Start threads for each team, ensuring only test cases for that team are executed
+    team_threads = []
     for team in selected_teams:
         team_thread = threading.Thread(
             target=execute_test_cases, 
