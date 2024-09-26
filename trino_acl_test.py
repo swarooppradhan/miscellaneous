@@ -14,6 +14,12 @@ import threading
 
 # Global flag to indicate when the execution is complete
 execution_complete = False
+# Dictionary to store reusable connections
+connection_pool = {}
+# Dictionary to store variable values
+variable_values_cache = {}
+# Dictionary to keep track of failed connections
+failed_connections = set()
 
 # Function to display the execution summary
 def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
@@ -72,9 +78,6 @@ def get_user_passwords(users_df, selected_env):
         user_passwords[user] = password
     return user_passwords
 
-# Dictionary to store reusable connections
-connection_pool = {}
-
 # Function to get or reuse a Trino connection using BasicAuthentication
 def get_or_create_trino_connection(host_url, user, password):
     connection_key = (host_url, user)
@@ -94,9 +97,6 @@ def get_or_create_trino_connection(host_url, user, password):
 # Function to pretty format the SQL query
 def format_sql(sql_query):
     return sqlparse.format(sql_query, reindent=True, keyword_case='upper')
-
-# Dictionary to store variable values
-variable_values_cache = {}
 
 # Function to collect variable values from the "SQL Variables" sheet and prompt if not found
 def collect_variable_values(test_cases_df, sql_variables_df, selected_env):
@@ -175,18 +175,30 @@ def apply_result_formatting(file_path, df, sheet_name='Test Cases'):
 
     workbook.save(file_path)
 
-# Function to get the team and environment selection
-def get_team_and_env_selection(test_cases_df, trino_env_df):
+# Function to get team selection
+def get_selected_teams(test_cases_df):
+    # Get a unique list of teams and present them as a numbered list
     teams = sorted(test_cases_df['Team'].unique())
-    
-    print("Select the team for which test cases should be executed:")
-    print("0. All")
-    for idx, team in enumerate(teams, start=1):
+    print("Available teams:")
+    for idx, team in enumerate(teams, 1):
         print(f"{idx}. {team}")
-    
-    selected_team_option = int(input("Enter the number corresponding to your choice: "))
-    selected_team = None if selected_team_option == 0 else teams[selected_team_option - 1]
 
+    print("0. All Teams")  # Option to select all teams
+
+    # Prompt user to enter team numbers as a comma-separated list
+    selected_team_numbers = input("Enter the team numbers to execute (comma-separated, e.g., 1,3,5) or '0' for all: ")
+
+    # Convert the input into a list of selected team indices
+    selected_indices = [int(num.strip()) for num in selected_team_numbers.split(",") if num.strip().isdigit()]
+
+    # Determine the actual selected teams
+    if 0 in selected_indices:
+        return teams  # Return all teams if '0' is selected
+    else:
+        return [teams[idx - 1] for idx in selected_indices if 1 <= idx <= len(teams)]
+
+# Function to get environment selection
+def get_selected_env(trino_env_df):
     envs = sorted(trino_env_df['Env'].unique())
     
     print("\nSelect the environment to be used:")
@@ -198,8 +210,89 @@ def get_team_and_env_selection(test_cases_df, trino_env_df):
     
     return selected_team, selected_env
 
-# Dictionary to keep track of failed connections
-failed_connections = set()
+def execute_test_cases(test_cases_df, selected_env, user_passwords, sql_variables_df, log_filepath, execution_type):
+    for index, test_case in test_cases_df.iterrows():
+        test_case_number = test_case['Test Case Number']
+        team = test_case['Team']
+        instance_type = test_case['Trino Instance Type']
+        sql_query = test_case['SQL Query']
+        expected_status = test_case['Expected Status']
+        group = test_case['Group']
+        use_case = test_case['Use Case']
+
+        logging.info(f"Executing {execution_type} Test Case Number: {test_case_number} | Team: {team}")
+        logging.info(f"Use Case: {use_case}")
+
+        # Replace variables in the SQL query using collected values
+        executed_sql = replace_variables_in_sql(sql_query)
+        logging.info(f"SQL query after variable replacement: \n{format_sql(executed_sql)}")
+
+        # Save the actual executed SQL to the DataFrame
+        test_cases_df.at[index, 'Executed SQL'] = executed_sql
+
+        trino_env_row = trino_env_df[
+            (trino_env_df['Team'] == team) &
+            (trino_env_df['Trino Instance Type'] == instance_type) &
+            (trino_env_df['Env'] == selected_env)
+        ]
+
+        if trino_env_row.empty:
+            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
+            test_cases_df.at[index, 'Result'] = 'FAIL'
+            test_cases_df.at[index, 'Error Message'] = 'Host URL not found'
+            logging.info(f"Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
+            continue
+
+        host_url = trino_env_row.iloc[0]['Host URL']
+        user_row = users_df[(users_df['Env'] == selected_env) & (users_df['Group'] == group)]
+        
+        if user_row.empty:
+            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
+            test_cases_df.at[index, 'Result'] = 'FAIL'
+            test_cases_df.at[index, 'Error Message'] = 'User not found'
+            logging.info(f"User not found for Group: {group} in Environment: {selected_env}")
+            continue
+
+        user = user_row.iloc[0]['User']
+        password = user_passwords[user]
+
+        # Check if this user and host URL combination has already failed
+        connection_key = (host_url, user)
+        if connection_key in failed_connections:
+            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
+            test_cases_df.at[index, 'Result'] = 'FAIL'
+            test_cases_df.at[index, 'Error Message'] = 'Previous connection attempt failed for this user and host URL'
+            logging.info(f"Skipping Test Case Number {test_case_number} due to prior connection failure for Host URL: {host_url} and User: {user}")
+            continue
+
+        try:
+            # Attempt to get or reuse an existing connection from the pool
+            conn = get_or_create_trino_connection(host_url, user, password)
+        except Exception as e:
+            # If connection fails, capture the error, mark this combination as failed, and proceed with the next test case
+            error_message = f"Connection failed: {str(e)}"
+            test_cases_df.at[index, 'Actual Status'] = 'ERROR'
+            test_cases_df.at[index, 'Result'] = 'FAIL'
+            test_cases_df.at[index, 'Error Message'] = error_message
+            logging.info(f"Failed to connect for Test Case Number {test_case_number}: {error_message}")
+            
+            # Add this host URL and user combination to the failed_connections set
+            failed_connections.add(connection_key)
+            continue
+        
+        actual_status, response = execute_sql_with_trino(conn, executed_sql)
+        test_cases_df.at[index, 'Actual Status'] = actual_status
+
+        # Capture the error message in the "Error Message" column if execution failed
+        if actual_status == 'ERROR':
+            test_cases_df.at[index, 'Error Message'] = response
+        
+        logging.info(f"Response for Test Case Number {test_case_number}: {response}")
+
+        if actual_status == expected_status:
+            test_cases_df.at[index, 'Result'] = 'PASS'
+        else:
+            test_cases_df.at[index, 'Result'] = 'FAIL'
 
 # Main function to process test cases
 def process_test_cases(file_path):
@@ -212,7 +305,7 @@ def process_test_cases(file_path):
     # Get the directory of the provided Excel file
     excel_directory = os.path.dirname(file_path)
 
-    selected_team, selected_env = get_team_and_env_selection(test_cases_df, trino_env_df)
+    selected_env = get_selected_env(trino_env_df)
 
     # Prompt the user for refresh frequency in minutes
     refresh_frequency = int(input("Enter the refresh frequency in minutes for the summary display: "))
@@ -221,18 +314,17 @@ def process_test_cases(file_path):
     setup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Setup']
     cleanup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Clean up']
     
-    # Select only the 'Test' test cases for the selected team, or all if 'All' was selected
-    if selected_team:
-        test_cases_df = test_cases_df[
-            (test_cases_df['Execution Type'] == 'Test') & 
-            (test_cases_df['Team'] == selected_team)
-        ]
-    else:
-        # If 'All' is selected, include all 'Test' test cases
-        test_cases_df = test_cases_df[test_cases_df['Execution Type'] == 'Test']
+    # Select teams based on user input
+    selected_teams = get_selected_teams(test_cases_df)
+
+    # Select only the 'Test' test cases for the selected teams
+    team_test_cases_df = test_cases_df[
+        (test_cases_df['Execution Type'] == 'Test') & 
+        (test_cases_df['Team'].isin(selected_teams))
+    ]
 
     # Combine all test cases in the correct order: Setup -> Test -> Clean up
-    ordered_test_cases_df = pd.concat([setup_test_cases, test_cases_df, cleanup_test_cases], ignore_index=True)
+    ordered_test_cases_df = pd.concat([setup_test_cases, team_test_cases_df, cleanup_test_cases], ignore_index=True)
 
     # Convert 'Actual Status', 'Result', add 'Executed SQL' and 'Error Message' columns
     ordered_test_cases_df['Actual Status'] = ordered_test_cases_df['Actual Status'].astype(object)
@@ -240,104 +332,38 @@ def process_test_cases(file_path):
     ordered_test_cases_df['Executed SQL'] = ""  # Initialize an empty column for Executed SQL
     ordered_test_cases_df['Error Message'] = ""  # Initialize an empty column for Error Messages
 
+    total_test_cases = len(ordered_test_cases_df)
+
     # Collect all SQL variable values before execution
     collect_variable_values(ordered_test_cases_df, sql_variables_df, selected_env)
 
     user_passwords = get_user_passwords(users_df, selected_env)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    log_filepath = setup_logging(excel_directory, selected_team, selected_env, timestamp)
-    output_filename = generate_output_filename(excel_directory, selected_team, selected_env, timestamp)
-    total_test_cases = len(ordered_test_cases_df)
+    log_filepath = setup_logging(excel_directory, ','.join(selected_teams), selected_env, timestamp)
+    output_filename = generate_output_filename(excel_directory, ','.join(selected_teams), selected_env, timestamp)
+
+    # Execute the "Setup" test cases
+    execute_test_cases(setup_test_cases, selected_env, user_passwords, sql_variables_df, log_filepath, "Setup")
 
     # Start the summary display thread
     summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
     summary_thread.start()
 
-    # Execute each test case in the ordered list
-    for index, test_case in ordered_test_cases_df.iterrows():
-        test_case_number = test_case['Test Case Number']
-        team = test_case['Team']
-        instance_type = test_case['Trino Instance Type']
-        sql_query = test_case['SQL Query']
-        execution_type = test_case['Execution Type']
-        expected_status = test_case['Expected Status']
-        group = test_case['Group']
-        use_case = test_case['Use Case']
+    # Execute test cases for each selected team in parallel
+    team_threads = []
+    for team in selected_teams:
+        team_specific_df = team_test_cases_df[team_test_cases_df['Team'] == team]
+        team_thread = threading.Thread(target=execute_test_cases, args=(team_specific_df, selected_env, user_passwords, sql_variables_df, log_filepath, "Test"))
+        team_threads.append(team_thread)
+        team_thread.start()
 
-        logging.info(f"Executing Test Case Number: {test_case_number} | Execution Type: {execution_type}")
-        logging.info(f"Use Case: {use_case}")
+    # Wait for all team threads to finish
+    for thread in team_threads:
+        thread.join()
 
-        # Replace variables in the SQL query using collected values
-        executed_sql = replace_variables_in_sql(sql_query)
-        logging.info(f"SQL query after variable replacement: \n{format_sql(executed_sql)}")
-
-        # Save the actual executed SQL to the DataFrame
-        ordered_test_cases_df.at[index, 'Executed SQL'] = executed_sql
-
-        trino_env_row = trino_env_df[
-            (trino_env_df['Team'] == team) &
-            (trino_env_df['Trino Instance Type'] == instance_type) &
-            (trino_env_df['Env'] == selected_env)
-        ]
-
-        if trino_env_row.empty:
-            ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
-            ordered_test_cases_df.at[index, 'Error Message'] = 'Host URL not found'
-            logging.info(f"Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
-            continue
-
-        host_url = trino_env_row.iloc[0]['Host URL']
-        user_row = users_df[(users_df['Env'] == selected_env) & (users_df['Group'] == group)]
-        
-        if user_row.empty:
-            ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
-            ordered_test_cases_df.at[index, 'Error Message'] = 'User not found'
-            logging.info(f"User not found for Group: {group} in Environment: {selected_env}")
-            continue
-
-        user = user_row.iloc[0]['User']
-        password = user_passwords[user]
-
-        # Check if this user and host URL combination has already failed
-        connection_key = (host_url, user)
-        if connection_key in failed_connections:
-            ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
-            ordered_test_cases_df.at[index, 'Error Message'] = 'Previous connection attempt failed for this user and host URL'
-            logging.info(f"Skipping Test Case Number {test_case_number} due to prior connection failure for Host URL: {host_url} and User: {user}")
-            continue
-
-        try:
-            # Attempt to get or reuse an existing connection from the pool
-            conn = get_or_create_trino_connection(host_url, user, password)
-        except Exception as e:
-            # If connection fails, capture the error, mark this combination as failed, and proceed with the next test case
-            error_message = f"Connection failed: {str(e)}"
-            ordered_test_cases_df.at[index, 'Actual Status'] = 'ERROR'
-            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
-            ordered_test_cases_df.at[index, 'Error Message'] = error_message
-            logging.info(f"Failed to connect for Test Case Number {test_case_number}: {error_message}")
-            
-            # Add this host URL and user combination to the failed_connections set
-            failed_connections.add(connection_key)
-            continue
-        
-        actual_status, response = execute_sql_with_trino(conn, executed_sql)
-        ordered_test_cases_df.at[index, 'Actual Status'] = actual_status
-
-        # Capture the error message in the "Error Message" column if execution failed
-        if actual_status == 'ERROR':
-            ordered_test_cases_df.at[index, 'Error Message'] = response
-        
-        logging.info(f"Response for Test Case Number {test_case_number}: {response}")
-
-        if actual_status == expected_status:
-            ordered_test_cases_df.at[index, 'Result'] = 'PASS'
-        else:
-            ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
+    # Execute the "Clean up" test cases after all team test cases are finished
+    execute_test_cases(cleanup_test_cases, selected_env, user_passwords, sql_variables_df, log_filepath, "Clean up")
 
     # Write the results to the Excel file first
     save_results_to_new_excel(output_filename, ordered_test_cases_df)
