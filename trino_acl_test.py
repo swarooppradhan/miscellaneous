@@ -16,7 +16,7 @@ import threading
 execution_complete = False
 
 # Function to display the execution summary
-def display_summary(ordered_test_cases_df, total_test_cases):
+def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
     while not execution_complete:
         executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()]
         passed_cases = executed_cases[executed_cases['Result'] == 'PASS']
@@ -29,7 +29,7 @@ def display_summary(ordered_test_cases_df, total_test_cases):
         print(f"Failed Test Cases: {len(failed_cases)}")
         print("="*50 + "\n")
         
-        time.sleep(60)  # Refresh every 1 minute
+        time.sleep(refresh_frequency * 60)  # Refresh based on user-defined frequency
 
     # Print the final summary once all test cases are executed
     executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()]
@@ -214,6 +214,9 @@ def process_test_cases(file_path):
 
     selected_team, selected_env = get_team_and_env_selection(test_cases_df, trino_env_df)
 
+    # Prompt the user for refresh frequency in minutes
+    refresh_frequency = int(input("Enter the refresh frequency in minutes for the summary display: "))
+
     # Filter test cases based on Execution Type
     setup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Setup']
     cleanup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Clean up']
@@ -240,7 +243,7 @@ def process_test_cases(file_path):
     total_test_cases = len(ordered_test_cases_df)
 
     # Start the summary display thread
-    summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases), daemon=True)
+    summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
     summary_thread.start()
 
     # Collect all SQL variable values before execution
@@ -337,14 +340,16 @@ def process_test_cases(file_path):
         else:
             ordered_test_cases_df.at[index, 'Result'] = 'FAIL'
 
+    # Write the results to the Excel file first
+    save_results_to_new_excel(output_filename, ordered_test_cases_df)
+    apply_result_formatting(output_filename, ordered_test_cases_df)
+
     # Mark the execution as complete
     execution_complete = True
     # Wait for the summary thread to complete
     summary_thread.join()
 
-    save_results_to_new_excel(output_filename, ordered_test_cases_df)
-    apply_result_formatting(output_filename, ordered_test_cases_df)
-
+    # Print the location of the saved files
     print(f"Results have been saved to: {output_filename}")
     print(f"Logs have been saved to: {log_filepath}")
 
