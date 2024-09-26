@@ -1,6 +1,6 @@
 import pandas as pd
 import trino
-from trino.auth import BasicAuthentication  # Import BasicAuthentication
+from trino.auth import BasicAuthentication
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 import getpass
@@ -8,7 +8,25 @@ import logging
 import datetime
 import sqlparse
 import re
-import os  # Import for handling file paths
+import os
+import time
+import threading
+
+# Function to display the execution summary
+def display_summary(ordered_test_cases_df, total_test_cases):
+    while True:
+        executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()]
+        passed_cases = executed_cases[executed_cases['Result'] == 'PASS']
+        failed_cases = executed_cases[executed_cases['Result'] == 'FAIL']
+
+        print("\n" + "="*50)
+        print(f"Total Test Cases: {total_test_cases}")
+        print(f"Executed Test Cases: {len(executed_cases)}")
+        print(f"Passed Test Cases: {len(passed_cases)}")
+        print(f"Failed Test Cases: {len(failed_cases)}")
+        print("="*50 + "\n")
+        
+        time.sleep(60)  # Refresh every 1 minute
 
 # Function to set up logging with the desired log file name
 def setup_logging(excel_directory, team, env, timestamp):
@@ -201,6 +219,12 @@ def process_test_cases(file_path):
     ordered_test_cases_df['Executed SQL'] = ""  # Initialize an empty column for Executed SQL
     ordered_test_cases_df['Error Message'] = ""  # Initialize an empty column for Error Messages
 
+    total_test_cases = len(ordered_test_cases_df)
+
+    # Start the summary display thread
+    summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases), daemon=True)
+    summary_thread.start()
+
     # Collect all SQL variable values before execution
     collect_variable_values(ordered_test_cases_df, sql_variables_df, selected_env)
 
@@ -300,6 +324,7 @@ def process_test_cases(file_path):
 
     print(f"Results have been saved to: {output_filename}")
     print(f"Logs have been saved to: {log_filepath}")
+
 # Example usage
 if __name__ == "__main__":
     excel_file_path = input("Please provide the Excel file path: ")
