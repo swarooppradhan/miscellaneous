@@ -144,7 +144,8 @@ def get_user_passwords(users_df, selected_env):
         if env_var_name in os.environ:
             user_passwords[user] = os.environ[env_var_name]
         else:
-            user_passwords[user] = input(f"Enter the password for user {user}: ").strip()
+            password = getpass.getpass(prompt=f"Enter password for user '{user}' in environment '{selected_env}': ")
+            user_passwords[user] = password
     
     return user_passwords
 
