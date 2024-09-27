@@ -11,6 +11,7 @@ import re
 import os
 import time
 import threading
+import argparse
 
 # Global flag to indicate when the execution is complete
 execution_complete = False
@@ -22,6 +23,77 @@ variable_values_cache = {}
 failed_connections = set()
 # A lock to ensure thread-safe updates
 data_lock = threading.Lock()
+
+def main():
+    # Set up argument parsing
+    parser = argparse.ArgumentParser(description="Test Case Execution Script")
+    parser.add_argument('-f', '--file', type=str, help='Path to the Excel file')
+    parser.add_argument('-e', '--env', type=str, help='Environment name')
+    parser.add_argument('-t', '--teams', type=str, help='Comma-separated team names or "All Teams"')
+    parser.add_argument('-r', '--refresh', type=int, help='Refresh frequency in minutes for the summary display')
+
+    # Parse the arguments
+    args = parser.parse_args()
+
+    # Check if the Excel file path is provided, otherwise prompt for it
+    if args.file:
+        file_path = args.file
+    else:
+        file_path = input("Enter the path to the Excel file: ").strip()
+
+    # Read the Excel sheets into DataFrames once
+    test_cases_df = pd.read_excel(file_path, sheet_name='Test Cases')
+    users_df = pd.read_excel(file_path, sheet_name='Users')
+    trino_env_df = pd.read_excel(file_path, sheet_name='Trino env')
+    sql_variables_df = pd.read_excel(file_path, sheet_name='SQL Variables')
+
+    # Check if the environment is provided, otherwise prompt for it
+    if args.env:
+        selected_env = args.env
+    else:
+        selected_env = get_selected_env(trino_env_df)
+
+    # Check if teams are provided, otherwise prompt for it
+    if args.teams:
+        if args.teams.lower() == "all teams":
+            selected_teams = sorted(test_cases_df['Team'].unique())
+        else:
+            selected_teams = [team.strip() for team in args.teams.split(',')]
+    else:
+        selected_teams = get_selected_teams(test_cases_df)
+
+    # Check if refresh frequency is provided, otherwise prompt for it
+    if args.refresh:
+        refresh_frequency = args.refresh
+    else:
+        refresh_frequency = int(input("Enter the refresh frequency in minutes for the summary display: ").strip())
+
+    # Log and print the selections
+    print(f"Excel File Path: {file_path}")
+    print(f"Selected Environment: {selected_env}")
+    print(f"Selected Teams: {', '.join(selected_teams)}")
+    print(f"Refresh Frequency (minutes): {refresh_frequency}")
+
+    # Generate log file and result file names without team names
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    excel_directory = os.path.dirname(file_path)
+    log_filepath = os.path.join(excel_directory, f"trino_test_log_{selected_env}_{timestamp}.log").replace(" ", "_")
+    result_filepath = os.path.join(excel_directory, f"trino_test_results_{selected_env}_{timestamp}.xlsx").replace(" ", "_")
+
+    # Initialize logging
+    setup_logging(log_filepath)
+
+    # Log the selections
+    logging.info(f"Excel File Path: {file_path}")
+    logging.info(f"Selected Environment: {selected_env}")
+    logging.info(f"Selected Teams: {', '.join(selected_teams)}")
+    logging.info(f"Refresh Frequency (minutes): {refresh_frequency}")
+
+    # Handle password retrieval
+    user_passwords = get_user_passwords(users_df, selected_env)
+
+    # Proceed with your existing test case processing logic, passing the DataFrames and the new file paths
+    process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency)
 
 # Function to display the execution summary
 def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
@@ -55,31 +127,25 @@ def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
     print("="*50 + "\n")
 
 # Function to set up logging with the desired log file name
-def setup_logging(excel_directory, team, env, timestamp):
-    log_filename = f"trino_test_log_{team or 'All'}_{env}_{timestamp}.log".replace(' ', '_')
-    log_filepath = os.path.join(excel_directory, log_filename)
-    logging.basicConfig(
-        filename=log_filepath,
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
-    return log_filepath
-
-# Function to read the data from the Excel sheets
-def read_excel_data(file_path):
-    test_cases_df = pd.read_excel(file_path, sheet_name='Test Cases')
-    users_df = pd.read_excel(file_path, sheet_name='Users')
-    trino_env_df = pd.read_excel(file_path, sheet_name='Trino Env')
-    return test_cases_df, users_df, trino_env_df
+def setup_logging(log_filepath):
+    import logging
+    logging.basicConfig(filename=log_filepath, level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Function to get passwords for unique users based on the selected environment
 def get_user_passwords(users_df, selected_env):
-    user_passwords = {}
-    env_specific_users = users_df[users_df['Env'] == selected_env]
+    # Filter users by the selected environment
+    env_users = users_df[users_df['Env'] == selected_env]['User'].unique()
     
-    for user in env_specific_users['User'].unique():
-        password = getpass.getpass(prompt=f"Enter password for user '{user}' in environment '{selected_env}': ")
-        user_passwords[user] = password
+    user_passwords = {}
+    
+    for user in env_users:
+        env_var_name = f"{user}_SECRET"
+        if env_var_name in os.environ:
+            user_passwords[user] = os.environ[env_var_name]
+        else:
+            user_passwords[user] = input(f"Enter the password for user {user}: ").strip()
+    
     return user_passwords
 
 # Function to get or reuse a Trino connection using BasicAuthentication
@@ -306,28 +372,16 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
             else:
                 ordered_test_cases_df.loc[index, 'Result'] = 'FAIL'
 
-def process_test_cases(file_path):
+def process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency):
     global execution_complete  # Use the global execution_complete flag
 
-    # Read data from Excel sheets
-    test_cases_df, users_df, trino_env_df = read_excel_data(file_path)
-    sql_variables_df = pd.read_excel(file_path, sheet_name='SQL Variables')
-    
     # Get the directory of the provided Excel file
     excel_directory = os.path.dirname(file_path)
-
-    selected_env = get_selected_env(trino_env_df)
-
-    # Prompt the user for refresh frequency in minutes
-    refresh_frequency = int(input("Enter the refresh frequency in minutes for the summary display: "))
 
     # Filter test cases based on Execution Type
     setup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Setup']
     cleanup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Clean up']
     
-    # Select teams based on user input
-    selected_teams = get_selected_teams(test_cases_df)
-
     # Select only the 'Test' test cases for the selected teams
     team_test_cases_df = test_cases_df[
         (test_cases_df['Execution Type'] == 'Test') & 
@@ -350,9 +404,6 @@ def process_test_cases(file_path):
 
     user_passwords = get_user_passwords(users_df, selected_env)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    log_filepath = setup_logging(excel_directory, ','.join(selected_teams), selected_env, timestamp)
-    output_filename = generate_output_filename(excel_directory, ','.join(selected_teams), selected_env, timestamp)
 
     # Start the summary display thread
     summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
@@ -380,8 +431,8 @@ def process_test_cases(file_path):
     execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_env, user_passwords, sql_variables_df, "Clean up")
 
     # Write the results to the Excel file first
-    save_results_to_new_excel(output_filename, ordered_test_cases_df)
-    apply_result_formatting(output_filename, ordered_test_cases_df)
+    save_results_to_new_excel(result_filepath, ordered_test_cases_df)
+    apply_result_formatting(result_filepath, ordered_test_cases_df)
 
     # Mark the execution as complete
     execution_complete = True
@@ -389,10 +440,8 @@ def process_test_cases(file_path):
     summary_thread.join()
 
     # Print the location of the saved files
-    print(f"Results have been saved to: {output_filename}")
+    print(f"Results have been saved to: {result_filepath}")
     print(f"Logs have been saved to: {log_filepath}")
 
-# Example usage
-if __name__ == "__main__":
-    excel_file_path = input("Please provide the Excel file path: ")
-    process_test_cases(excel_file_path)
+if __name__ == '__main__':
+    main()
