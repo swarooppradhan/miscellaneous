@@ -127,7 +127,7 @@ def main():
 
 def save_filtered_sheets(result_filepath, selected_env, users_df, trino_env_df, sql_variables_df):
     # Load the existing workbook
-    workbook = openpyxl.load_workbook(result_filepath)
+    workbook = load_workbook(result_filepath)
 
     # Save the filtered Users sheet
     filtered_users_df = users_df[users_df['Env'] == selected_env]
