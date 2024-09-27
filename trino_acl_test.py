@@ -116,6 +116,9 @@ def main():
 
 # Function to display the execution summary
 def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
+    # Get the main logger
+    main_logger = logging.getLogger("main")
+
     while not execution_complete:
         with data_lock:
             executed_cases = ordered_test_cases_df[ordered_test_cases_df['Actual Status'].notna()].shape[0]
@@ -137,8 +140,6 @@ def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
         passed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'PASS'].shape[0]
         failed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'FAIL'].shape[0]
 
-    # Get the main logger
-    main_logger = logging.getLogger("main")
     main_logger.info("\nFinal Summary")
     main_logger.info("=" * 50)
     main_logger.info(f"Total Test Cases: {total_test_cases}")
