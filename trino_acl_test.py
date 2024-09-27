@@ -95,6 +95,10 @@ def main():
     # Proceed with your existing test case processing logic, passing the DataFrames and the new file paths
     process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency)
 
+    # Print the location of the saved files
+    print(f"Results have been saved to: {result_filepath}")
+    print(f"Logs have been saved to: {log_filepath}")    
+
 # Function to display the execution summary
 def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
     while not execution_complete:
@@ -436,10 +440,6 @@ def process_test_cases(result_filepath, selected_env, selected_teams, user_passw
     execution_complete = True
     # Wait for the summary thread to complete
     summary_thread.join()
-
-    # Print the location of the saved files
-    print(f"Results have been saved to: {result_filepath}")
-    print(f"Logs have been saved to: {log_filepath}")
 
 if __name__ == '__main__':
     main()
