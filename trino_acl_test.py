@@ -37,9 +37,9 @@ def main():
 
     # Check if the Excel file path is provided, otherwise prompt for it
     if args.file:
-        file_path = args.file
+        file_path = os.path.abspath(args.file)
     else:
-        file_path = input("Enter the path to the Excel file: ").strip()
+        file_path = os.path.abspath(input("Enter the path to the Excel file: ").strip())
 
     # Read the Excel sheets using sheet names with the first letter of every word capitalized
     test_cases_df = pd.read_excel(file_path, sheet_name='Test Cases')
