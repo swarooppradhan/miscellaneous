@@ -68,19 +68,13 @@ def main():
     else:
         refresh_frequency = int(input("Enter the refresh frequency in minutes for the summary display: ").strip())
 
-    # Log and print the selections
-    print(f"Excel File Path: {file_path}")
-    print(f"Selected Environment: {selected_env}")
-    print(f"Selected Teams: {', '.join(selected_teams)}")
-    print(f"Refresh Frequency (minutes): {refresh_frequency}")
-
     # Generate log file and result file names without team names
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     excel_directory = os.path.dirname(file_path)
     result_filepath = os.path.join(excel_directory, f"trino_test_results_{selected_env}_{timestamp}.xlsx").replace(" ", "_")
     main_log_filepath = os.path.join(excel_directory, f"trino_test_main_log_{selected_env}_{timestamp}.log").replace(" ", "_")
     
-    setup_logging(main_log_filepath, "main")
+    setup_logging(main_log_filepath, "main", to_console=True)
 
     # Get the main logger
     main_logger = logging.getLogger("main")
@@ -117,13 +111,8 @@ def main():
     for team, path in log_file_paths.items():
         if os.path.exists(path) and os.path.getsize(path) > 0:
             main_logger.info(f"Team '{team}': {path}")
-            print(f"Team '{team}': {path}")
         else:
             main_logger.info(f"No log entries were made for team '{team}', so the log file may be empty or not created.")
-    
-    # Print the location of the saved files
-    print(f"Results have been saved to: {result_filepath}")
-    print(f"Main logs have been saved to: {main_log_filepath}")    
 
 # Function to display the execution summary
 def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
@@ -133,12 +122,12 @@ def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
             passed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'PASS'].shape[0]
             failed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'FAIL'].shape[0]
 
-        print("\n" + "="*50)
-        print(f"Total Test Cases: {total_test_cases}")
-        print(f"Executed Test Cases: {executed_cases}")
-        print(f"Passed Test Cases: {passed_cases}")
-        print(f"Failed Test Cases: {failed_cases}")
-        print("="*50 + "\n")
+        main_logger.info("=" * 50)
+        main_logger.info(f"Total Test Cases: {total_test_cases}")
+        main_logger.info(f"Executed Test Cases: {executed_cases}")
+        main_logger.info(f"Passed Test Cases: {passed_cases}")
+        main_logger.info(f"Failed Test Cases: {failed_cases}")
+        main_logger.info("=" * 50)
         
         time.sleep(refresh_frequency * 60)  # Refresh based on user-defined frequency
 
@@ -158,16 +147,8 @@ def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
     main_logger.info(f"Failed Test Cases: {failed_cases}")
     main_logger.info("=" * 50)
     
-    print("\nFinal Summary")
-    print("="*50)
-    print(f"Total Test Cases: {total_test_cases}")
-    print(f"Executed Test Cases: {executed_cases}")
-    print(f"Passed Test Cases: {passed_cases}")
-    print(f"Failed Test Cases: {failed_cases}")
-    print("="*50 + "\n")
-
 # Function to set up logging with the desired log file name
-def setup_logging(log_filepath, logger_name):
+def setup_logging(log_filepath, logger_name,  to_console=False):
     # Set up logging for the given logger name
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.INFO)
@@ -184,6 +165,15 @@ def setup_logging(log_filepath, logger_name):
     if logger.hasHandlers():
         logger.handlers.clear()  # Remove existing handlers to prevent duplicate logs
     logger.addHandler(file_handler)
+    
+    if to_console:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    
+    # Prevent the logger from propagating messages to the root logger
+    logger.propagate = False
 
 # Function to get passwords for unique users based on the selected environment
 def get_user_passwords(users_df, selected_env):
@@ -258,21 +248,21 @@ def replace_variables_in_sql(sql_query):
     return sql_query
 
 # Function to execute SQL and return status
-def execute_sql_with_trino(conn, sql_query):
+def execute_sql_with_trino(conn, sql_query, logger):
     try:
         cursor = conn.cursor()
         cursor.execute(sql_query)
         
         if sql_query.strip().lower().startswith(('select', 'with', 'show')):
             results = cursor.fetchall()
-            logging.info(f"Query executed successfully: \n{format_sql(sql_query)}")
+            logger.info(f"Query executed successfully: \n{format_sql(sql_query)}")
             return "COMPLETED", results
         else:
-            logging.info(f"DDL executed successfully: \n{format_sql(sql_query)}")
+            logger.info(f"DDL executed successfully: \n{format_sql(sql_query)}")
             return "COMPLETED", "DDL statement executed"
 
     except Exception as e:
-        logging.error(f"Error executing query: \n{format_sql(sql_query)}. Error: {str(e)}")
+        logger.error(f"Error executing query: \n{format_sql(sql_query)}. Error: {str(e)}")
         return "ERROR", str(e)
 
 # Function to generate the output filename
@@ -416,7 +406,7 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
             failed_connections.add(connection_key)
             continue
         
-        actual_status, response = execute_sql_with_trino(conn, executed_sql)
+        actual_status, response = execute_sql_with_trino(conn, executed_sql, logger)
         with data_lock:
             ordered_test_cases_df.loc[index, 'Actual Status'] = actual_status
 
