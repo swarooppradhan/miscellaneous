@@ -140,7 +140,7 @@ def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
         passed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'PASS'].shape[0]
         failed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'FAIL'].shape[0]
 
-    main_logger.info("\nFinal Summary")
+    main_logger.info("Final Summary")
     main_logger.info("=" * 50)
     main_logger.info(f"Total Test Cases: {total_test_cases}")
     main_logger.info(f"Executed Test Cases: {executed_cases}")
@@ -155,7 +155,7 @@ def setup_logging(log_filepath, logger_name,  to_console=False):
     logger.setLevel(logging.INFO)
 
     # Create a file handler for the log file
-    file_handler = logging.FileHandler(log_filepath)
+    file_handler = logging.FileHandler(log_filepath, encoding='utf-8')
     file_handler.setLevel(logging.INFO)
 
     # Create a logging format
