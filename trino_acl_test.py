@@ -44,7 +44,7 @@ def main():
     # Read the Excel sheets into DataFrames once
     test_cases_df = pd.read_excel(file_path, sheet_name='Test Cases')
     users_df = pd.read_excel(file_path, sheet_name='Users')
-    trino_env_df = pd.read_excel(file_path, sheet_name='Trino env')
+    trino_env_df = pd.read_excel(file_path, sheet_name='Trino Env')
     sql_variables_df = pd.read_excel(file_path, sheet_name='SQL Variables')
 
     # Check if the environment is provided, otherwise prompt for it
