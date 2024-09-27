@@ -77,17 +77,33 @@ def main():
     # Generate log file and result file names without team names
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     excel_directory = os.path.dirname(file_path)
-    log_filepath = os.path.join(excel_directory, f"trino_test_log_{selected_env}_{timestamp}.log").replace(" ", "_")
     result_filepath = os.path.join(excel_directory, f"trino_test_results_{selected_env}_{timestamp}.xlsx").replace(" ", "_")
+    main_log_filepath = os.path.join(excel_directory, f"trino_test_main_log_{selected_env}_{timestamp}.log").replace(" ", "_")
+    
+    setup_logging(main_log_filepath, "main")
 
-    # Initialize logging
-    setup_logging(log_filepath)
+    # Get the main logger
+    main_logger = logging.getLogger("main")
 
-    # Log the selections
-    logging.info(f"Excel File Path: {file_path}")
-    logging.info(f"Selected Environment: {selected_env}")
-    logging.info(f"Selected Teams: {', '.join(selected_teams)}")
-    logging.info(f"Refresh Frequency (minutes): {refresh_frequency}")
+    # Log the selections using the main logger
+    main_logger.info(f"Excel File Path: {file_path}")
+    main_logger.info(f"Selected Environment: {selected_env}")
+    main_logger.info(f"Selected Teams: {', '.join(selected_teams)}")
+    main_logger.info(f"Refresh Frequency (minutes): {refresh_frequency}")
+    
+    # Set up loggers for all teams present in the test cases, not just the selected ones
+    all_teams = sorted(test_cases_df['Team'].unique())
+    
+    main_logger.info("Setting up log files for all teams...")
+    
+    log_file_paths = {}
+    for team in all_teams:
+        log_filepath = os.path.join(excel_directory, f"trino_test_log_{selected_env}_{team}_{timestamp}.log").replace(" ", "_")
+        setup_logging(log_filepath, team)
+        log_file_paths[team] = log_filepath
+        main_logger.info(f"Log file for team '{team}': {log_filepath}")
+
+    main_logger.info("Log setup completed. Refer to the above paths for team-specific logs.")
 
     # Handle password retrieval using group names
     user_passwords = get_user_passwords(users_df, selected_env)
@@ -95,9 +111,19 @@ def main():
     # Proceed with your existing test case processing logic, passing the DataFrames and the new file paths
     process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency)
 
+    # After test execution, log the result file path and all log file paths
+    main_logger.info(f"Test execution completed. Results have been saved to: {result_filepath}")
+    main_logger.info("The following team-specific log files were generated:")
+    for team, path in log_file_paths.items():
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            main_logger.info(f"Team '{team}': {path}")
+            print(f"Team '{team}': {path}")
+        else:
+            main_logger.info(f"No log entries were made for team '{team}', so the log file may be empty or not created.")
+    
     # Print the location of the saved files
     print(f"Results have been saved to: {result_filepath}")
-    print(f"Logs have been saved to: {log_filepath}")    
+    print(f"Main logs have been saved to: {main_log_filepath}")    
 
 # Function to display the execution summary
 def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
@@ -122,6 +148,16 @@ def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
         passed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'PASS'].shape[0]
         failed_cases = ordered_test_cases_df[ordered_test_cases_df['Result'] == 'FAIL'].shape[0]
 
+    # Get the main logger
+    main_logger = logging.getLogger("main")
+    main_logger.info("\nFinal Summary")
+    main_logger.info("=" * 50)
+    main_logger.info(f"Total Test Cases: {total_test_cases}")
+    main_logger.info(f"Executed Test Cases: {executed_cases}")
+    main_logger.info(f"Passed Test Cases: {passed_cases}")
+    main_logger.info(f"Failed Test Cases: {failed_cases}")
+    main_logger.info("=" * 50)
+    
     print("\nFinal Summary")
     print("="*50)
     print(f"Total Test Cases: {total_test_cases}")
@@ -131,10 +167,23 @@ def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
     print("="*50 + "\n")
 
 # Function to set up logging with the desired log file name
-def setup_logging(log_filepath):
-    import logging
-    logging.basicConfig(filename=log_filepath, level=logging.INFO,
-                        format='%(asctime)s - %(levelname)s - %(message)s')
+def setup_logging(log_filepath, logger_name):
+    # Set up logging for the given logger name
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.INFO)
+
+    # Create a file handler for the log file
+    file_handler = logging.FileHandler(log_filepath)
+    file_handler.setLevel(logging.INFO)
+
+    # Create a logging format
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+
+    # Add the file handler to the logger
+    if logger.hasHandlers():
+        logger.handlers.clear()  # Remove existing handlers to prevent duplicate logs
+    logger.addHandler(file_handler)
 
 # Function to get passwords for unique users based on the selected environment
 def get_user_passwords(users_df, selected_env):
@@ -304,12 +353,15 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
         group = test_case['Group']
         use_case = test_case['Use Case']
 
-        logging.info(f"[{current_thread}] Executing {execution_type} Test Case Number: {test_case_number} | Team: {team}")
-        logging.info(f"[{current_thread}] Use Case: {use_case}")
+        # Obtain the logger for the specific team
+        logger = logging.getLogger(team)
+
+        logger.info(f"[{current_thread}] Executing {execution_type} Test Case Number: {test_case_number} | Team: {team}")
+        logger.info(f"[{current_thread}] Use Case: {use_case}")
 
         # Replace variables in the SQL query using collected values
         executed_sql = replace_variables_in_sql(sql_query)
-        logging.info(f"[{current_thread}] SQL query after variable replacement: \n{format_sql(executed_sql)}")
+        logger.info(f"[{current_thread}] SQL query after variable replacement: \n{format_sql(executed_sql)}")
 
         # Update the 'Executed SQL' column directly in the original DataFrame using .loc
         with data_lock:
@@ -326,7 +378,7 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
                 ordered_test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
                 ordered_test_cases_df.loc[index, 'Result'] = 'FAIL'
                 ordered_test_cases_df.loc[index, 'Error Message'] = 'Host URL not found'
-            logging.info(f"[{current_thread}] Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
+            logger.info(f"[{current_thread}] Host URL not found for Team: {team}, Instance Type: {instance_type}, and Env: {selected_env}")
             continue
 
         host_url = trino_env_row.iloc[0]['Host URL']
@@ -337,7 +389,7 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
                 ordered_test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
                 ordered_test_cases_df.loc[index, 'Result'] = 'FAIL'
                 ordered_test_cases_df.loc[index, 'Error Message'] = 'User not found'
-            logging.info(f"[{current_thread}] User not found for Group: {group} in Environment: {selected_env}")
+            logger.info(f"[{current_thread}] User not found for Group: {group} in Environment: {selected_env}")
             continue
 
         user = user_row.iloc[0]['User']
@@ -349,7 +401,7 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
                 ordered_test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
                 ordered_test_cases_df.loc[index, 'Result'] = 'FAIL'
                 ordered_test_cases_df.loc[index, 'Error Message'] = 'Previous connection attempt failed for this user and host URL'
-            logging.info(f"[{current_thread}] Skipping Test Case Number {test_case_number} due to prior connection failure for Host URL: {host_url} and User: {user}")
+            logger.info(f"[{current_thread}] Skipping Test Case Number {test_case_number} due to prior connection failure for Host URL: {host_url} and User: {user}")
             continue
 
         try:
@@ -360,7 +412,7 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
                 ordered_test_cases_df.loc[index, 'Actual Status'] = 'ERROR'
                 ordered_test_cases_df.loc[index, 'Result'] = 'FAIL'
                 ordered_test_cases_df.loc[index, 'Error Message'] = error_message
-            logging.info(f"[{current_thread}] Failed to connect for Test Case Number {test_case_number}: {error_message}")
+            logger.info(f"[{current_thread}] Failed to connect for Test Case Number {test_case_number}: {error_message}")
             failed_connections.add(connection_key)
             continue
         
@@ -372,7 +424,7 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
             with data_lock:
                 ordered_test_cases_df.loc[index, 'Error Message'] = response
         
-        logging.info(f"[{current_thread}] Response for Test Case Number {test_case_number}: {response}")
+        logger.info(f"[{current_thread}] Response for Test Case Number {test_case_number}: {response}")
 
         with data_lock:
             if actual_status == expected_status:
