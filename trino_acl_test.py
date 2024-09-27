@@ -376,9 +376,6 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
 def process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency):
     global execution_complete  # Use the global execution_complete flag
 
-    # Get the directory of the provided Excel file
-    excel_directory = os.path.dirname(file_path)
-
     # Filter test cases based on Execution Type
     setup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Setup']
     cleanup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Clean up']
