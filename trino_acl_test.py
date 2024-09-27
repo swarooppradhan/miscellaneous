@@ -400,9 +400,6 @@ def process_test_cases(result_filepath, selected_env, selected_teams, user_passw
     # Collect all SQL variable values before execution
     collect_variable_values(ordered_test_cases_df, sql_variables_df, selected_env)
 
-    user_passwords = get_user_passwords(users_df, selected_env)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
     # Start the summary display thread
     summary_thread = threading.Thread(target=display_summary, args=(ordered_test_cases_df, total_test_cases, refresh_frequency), daemon=True)
     summary_thread.start()
