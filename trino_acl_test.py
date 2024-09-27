@@ -84,6 +84,15 @@ def main():
     main_logger.info(f"Selected Environment: {selected_env}")
     main_logger.info(f"Selected Teams: {', '.join(selected_teams)}")
     main_logger.info(f"Refresh Frequency (minutes): {refresh_frequency}")
+
+    # Filter users for the selected environment
+    env_users_df = users_df[users_df['Env'] == selected_env]
+
+    # Log users for the selected environment
+    main_logger.info("Logging users for the selected environment:")
+    for group in env_users_df['Group'].unique():
+        user = env_users_df[env_users_df['Group'] == group]['User'].iloc[0]
+        main_logger.info(f"Group: {group}, User: {user}")
     
     # Set up loggers for all teams present in the test cases, not just the selected ones
     all_teams = sorted(test_cases_df['Team'].unique())
@@ -100,10 +109,12 @@ def main():
     main_logger.info("Log setup completed. Refer to the above paths for team-specific logs.")
 
     # Handle password retrieval using group names
-    user_passwords = get_user_passwords(users_df, selected_env)
+    user_passwords = get_user_passwords(env_users_df)
 
     # Proceed with your existing test case processing logic, passing the DataFrames and the new file paths
     process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency)
+
+    save_filtered_sheets(result_filepath, selected_env, users_df, trino_env_df, sql_variables_df)
 
     # After test execution, log the result file path and all log file paths
     main_logger.info(f"Test execution completed. Results have been saved to: {result_filepath}")
@@ -113,6 +124,34 @@ def main():
             main_logger.info(f"Team '{team}': {path}")
         else:
             main_logger.info(f"No log entries were made for team '{team}', so the log file may be empty or not created.")
+
+def save_filtered_sheets(result_filepath, selected_env, users_df, trino_env_df, sql_variables_df):
+    # Load the existing workbook
+    workbook = openpyxl.load_workbook(result_filepath)
+
+    # Save the filtered Users sheet
+    filtered_users_df = users_df[users_df['Env'] == selected_env]
+    with pd.ExcelWriter(result_filepath, engine='openpyxl', mode='a') as writer:
+        writer.book = workbook
+        writer.sheets = {ws.title: ws for ws in workbook.worksheets}
+        filtered_users_df.to_excel(writer, sheet_name='Users', index=False)
+
+    # Save the filtered Trino Env sheet
+    filtered_trino_env_df = trino_env_df[trino_env_df['Env'] == selected_env]
+    with pd.ExcelWriter(result_filepath, engine='openpyxl', mode='a') as writer:
+        writer.book = workbook
+        writer.sheets = {ws.title: ws for ws in workbook.worksheets}
+        filtered_trino_env_df.to_excel(writer, sheet_name='Trino Env', index=False)
+
+    # Save the filtered SQL Variables sheet
+    filtered_sql_variables_df = sql_variables_df[sql_variables_df['Env'] == selected_env]
+    with pd.ExcelWriter(result_filepath, engine='openpyxl', mode='a') as writer:
+        writer.book = workbook
+        writer.sheets = {ws.title: ws for ws in workbook.worksheets}
+        filtered_sql_variables_df.to_excel(writer, sheet_name='SQL Variables', index=False)
+
+    # Save the workbook
+    workbook.save(result_filepath)
 
 # Function to display the execution summary
 def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
@@ -176,10 +215,10 @@ def setup_logging(log_filepath, logger_name,  to_console=False):
     # Prevent the logger from propagating messages to the root logger
     logger.propagate = False
 
-# Function to get passwords for unique users based on the selected environment
-def get_user_passwords(users_df, selected_env):
+# Function to get passwords for unique users
+def get_user_passwords(users_df):
     # Filter users by the selected environment
-    env_users_groups = users_df[users_df['Env'] == selected_env][['User', 'Group']].drop_duplicates()
+    env_users_groups = users_df[['User', 'Group']].drop_duplicates()
 
     user_passwords = {}
     
