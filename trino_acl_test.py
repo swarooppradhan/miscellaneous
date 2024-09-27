@@ -41,7 +41,7 @@ def main():
     else:
         file_path = input("Enter the path to the Excel file: ").strip()
 
-    # Read the Excel sheets into DataFrames once
+    # Read the Excel sheets using sheet names with the first letter of every word capitalized
     test_cases_df = pd.read_excel(file_path, sheet_name='Test Cases')
     users_df = pd.read_excel(file_path, sheet_name='Users')
     trino_env_df = pd.read_excel(file_path, sheet_name='Trino Env')
@@ -89,7 +89,7 @@ def main():
     logging.info(f"Selected Teams: {', '.join(selected_teams)}")
     logging.info(f"Refresh Frequency (minutes): {refresh_frequency}")
 
-    # Handle password retrieval
+    # Handle password retrieval using group names
     user_passwords = get_user_passwords(users_df, selected_env)
 
     # Proceed with your existing test case processing logic, passing the DataFrames and the new file paths
@@ -135,17 +135,20 @@ def setup_logging(log_filepath):
 # Function to get passwords for unique users based on the selected environment
 def get_user_passwords(users_df, selected_env):
     # Filter users by the selected environment
-    env_users = users_df[users_df['Env'] == selected_env]['User'].unique()
-    
+    env_users_groups = users_df[users_df['Env'] == selected_env][['User', 'Group']].drop_duplicates()
+
     user_passwords = {}
     
-    for user in env_users:
-        env_var_name = f"{user}_SECRET"
+    for _, row in env_users_groups.iterrows():
+        user = row['User']
+        group = row['Group'].upper()  # Convert group to uppercase
+        env_var_name = f"{group}_SECRET"
+        
         if env_var_name in os.environ:
             user_passwords[user] = os.environ[env_var_name]
         else:
-            password = getpass.getpass(prompt=f"Enter password for user '{user}' in environment '{selected_env}': ")
-            user_passwords[user] = password
+            # Use getpass to hide password input
+            user_passwords[user] = getpass.getpass(prompt=f"Enter the password for group {group} (user: {user}): ")
     
     return user_passwords
 
