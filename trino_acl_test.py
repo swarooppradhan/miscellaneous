@@ -70,9 +70,10 @@ def main():
 
     # Generate log file and result file names without team names
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    input_file_name = os.path.splitext(os.path.basename(file_path))[0]
     excel_directory = os.path.dirname(file_path)
-    result_filepath = os.path.join(excel_directory, f"trino_test_results_{selected_env}_{timestamp}.xlsx").replace(" ", "_")
-    main_log_filepath = os.path.join(excel_directory, f"trino_test_main_log_{selected_env}_{timestamp}.log").replace(" ", "_")
+    result_filepath = os.path.join(excel_directory, f"{input_file_name}_results_{selected_env}_{timestamp}.xlsx").replace(" ", "_")
+    main_log_filepath = os.path.join(excel_directory, f"{input_file_name}_main_log_{selected_env}_{timestamp}.log").replace(" ", "_")
     
     setup_logging(main_log_filepath, "main", to_console=True)
 
@@ -101,7 +102,7 @@ def main():
     
     log_file_paths = {}
     for team in all_teams:
-        log_filepath = os.path.join(excel_directory, f"trino_test_log_{selected_env}_{team}_{timestamp}.log").replace(" ", "_")
+        log_filepath = os.path.join(excel_directory, f"{input_file_name}_log_{selected_env}_{team}_{timestamp}.log").replace(" ", "_")
         setup_logging(log_filepath, team)
         log_file_paths[team] = log_filepath
         main_logger.info(f"Log file for team '{team}': {log_filepath}")
