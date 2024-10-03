@@ -122,7 +122,7 @@ def main():
     # Log users for the selected environment
     main_logger.info("Logging users for the selected environment:")
     for group in users_df['Group'].unique():
-        user = users_df[env_users_df['Group'] == group]['User'].iloc[0]
+        user = users_df[users_df['Group'] == group]['User'].iloc[0]
         main_logger.info(f"Group: {group}, User: {user}")
 
     # Handle password retrieval using group names
@@ -485,7 +485,7 @@ def process_test_cases(result_filepath, selected_env, selected_teams, user_passw
     ordered_test_cases_df['Error Message'] = ""
 
     if 'Expected Response' in ordered_test_cases_df.columns:
-        ordered_test_cases_df['Expected Response'] = test_cases_df['Expected Response'].astype(str)
+        ordered_test_cases_df['Expected Response'] = ordered_test_cases_df['Expected Response'].astype(str)
     else:
         ordered_test_cases_df['Expected Response'] = ""  # Initialize if not present
     
