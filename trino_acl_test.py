@@ -325,7 +325,7 @@ def apply_result_formatting(file_path, df, sheet_name='Test Cases'):
     sheet = workbook[sheet_name]
 
     for index, row in df.iterrows():
-        result_cell = sheet[f'J{index + 2}']  # Column J is the 'Result'
+        result_cell = sheet[f'L{index + 2}']  # Column L is the 'Result'
         if row['Result'] == 'PASS':
             result_cell.fill = green_fill
         elif row['Result'] == 'FAIL':
@@ -381,6 +381,7 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
         instance_type = test_case['Trino Instance Type']
         sql_query = test_case['SQL Query']
         expected_status = test_case['Expected Status']
+        expected_response = test_case['Expected Response'].strip()
         group = test_case['Group']
         use_case = test_case['Use Case']
 
@@ -450,6 +451,7 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
         actual_status, response = execute_sql_with_trino(conn, executed_sql, logger)
         with data_lock:
             ordered_test_cases_df.loc[index, 'Actual Status'] = actual_status
+            ordered_test_cases_df.loc[index, 'Actual Response'] = str(response)
 
         if actual_status == 'ERROR':
             with data_lock:
@@ -459,13 +461,26 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
 
         with data_lock:
             if actual_status == expected_status:
-                ordered_test_cases_df.loc[index, 'Result'] = 'PASS'
+                # If statuses match, compare the expected and actual responses if provided
+                if expected_response:
+                    if str(response).strip() == expected_response:
+                        ordered_test_cases_df.loc[index, 'Result'] = 'PASS'
+                    else:
+                        ordered_test_cases_df.loc[index, 'Result'] = 'FAIL'
+                else:
+                    # No Expected Response specified, consider it a pass
+                    ordered_test_cases_df.loc[index, 'Result'] = 'PASS'
             else:
                 ordered_test_cases_df.loc[index, 'Result'] = 'FAIL'
 
 def process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency):
     global execution_complete  # Use the global execution_complete flag
-
+    
+    if 'Expected Response' in test_cases_df.columns:
+        test_cases_df['Expected Response'] = test_cases_df['Expected Response'].astype(str).fillna("")
+    else:
+        test_cases_df['Expected Response'] = ""  # Initialize if not present
+    
     # Filter test cases based on Execution Type
     setup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Setup']
     cleanup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Clean up']
@@ -479,12 +494,13 @@ def process_test_cases(result_filepath, selected_env, selected_teams, user_passw
     # Combine all test cases in the correct order: Setup -> Test -> Clean up
     ordered_test_cases_df = pd.concat([setup_test_cases, team_test_cases_df, cleanup_test_cases], ignore_index=True)
 
-    # Explicitly set 'Actual Status' and 'Result' columns to object dtype
-    ordered_test_cases_df['Actual Status'] = ordered_test_cases_df['Actual Status'].astype(object)
-    ordered_test_cases_df['Result'] = ordered_test_cases_df['Result'].astype(object)
-    ordered_test_cases_df['Executed SQL'] = ""  # Initialize an empty column for Executed SQL
-    ordered_test_cases_df['Error Message'] = ""  # Initialize an empty column for Error Messages
-
+    # Initialize columns
+    ordered_test_cases_df['Actual Status'] = ""
+    ordered_test_cases_df['Actual Response'] = ""
+    ordered_test_cases_df['Result'] = ""
+    ordered_test_cases_df['Executed SQL'] = ""
+    ordered_test_cases_df['Error Message'] = ""
+    
     total_test_cases = len(ordered_test_cases_df)
 
     # Collect all SQL variable values before execution
