@@ -116,7 +116,7 @@ def main():
     # Filter users for the selected environment and required groups
     users_df = users_df[
         (users_df['Env'] == selected_env) &
-        (users_df['Group'].isins(ordered_test_cases_df['Group'].unique()))
+        (users_df['Group'].isin(ordered_test_cases_df['Group'].unique()))
     ]
 
     # Log users for the selected environment
