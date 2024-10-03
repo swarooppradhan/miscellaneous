@@ -41,11 +41,11 @@ def main():
     else:
         file_path = os.path.abspath(input("Enter the path to the Excel file: ").strip())
 
-    # Read the Excel sheets using sheet names with the first letter of every word capitalized
-    test_cases_df = pd.read_excel(file_path, sheet_name='Test Cases')
-    users_df = pd.read_excel(file_path, sheet_name='Users')
-    trino_env_df = pd.read_excel(file_path, sheet_name='Trino Env')
-    sql_variables_df = pd.read_excel(file_path, sheet_name='SQL Variables')
+    # Read the Excel sheets using sheet names
+    test_cases_df = pd.read_excel(file_path, sheet_name='Test Cases').fillna('')
+    users_df = pd.read_excel(file_path, sheet_name='Users').fillna('')
+    trino_env_df = pd.read_excel(file_path, sheet_name='Trino Env').fillna('')
+    sql_variables_df = pd.read_excel(file_path, sheet_name='SQL Variables').fillna('')
 
     # Check if the environment is provided, otherwise prompt for it
     if args.env:
@@ -86,17 +86,21 @@ def main():
     main_logger.info(f"Selected Teams: {', '.join(selected_teams)}")
     main_logger.info(f"Refresh Frequency (minutes): {refresh_frequency}")
 
-    # Filter users for the selected environment
-    env_users_df = users_df[users_df['Env'] == selected_env]
-
-    # Log users for the selected environment
-    main_logger.info("Logging users for the selected environment:")
-    for group in env_users_df['Group'].unique():
-        user = env_users_df[env_users_df['Group'] == group]['User'].iloc[0]
-        main_logger.info(f"Group: {group}, User: {user}")
+    # Filter test cases based on Execution Type
+    setup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Setup']
+    cleanup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Clean up']
     
-    # Set up loggers for all teams present in the test cases, not just the selected ones
-    all_teams = sorted(test_cases_df['Team'].unique())
+    # Select only the 'Test' test cases for the selected teams
+    team_test_cases_df = test_cases_df[
+        (test_cases_df['Execution Type'] == 'Test') & 
+        (test_cases_df['Team'].isin(selected_teams))
+    ]
+
+    # Combine all test cases in the correct order: Setup -> Test -> Clean up
+    ordered_test_cases_df = pd.concat([setup_test_cases, team_test_cases_df, cleanup_test_cases], ignore_index=True)
+    
+    # Set up loggers for all teams present in the test cases for which test cases will be executed
+    all_teams = sorted(ordered_test_cases_df['Team'].unique())
     
     main_logger.info("Setting up log files for all teams...")
     
@@ -109,13 +113,22 @@ def main():
 
     main_logger.info("Log setup completed. Refer to the above paths for team-specific logs.")
 
+    # Filter users for the selected environment and required groups
+    users_df = users_df[
+        (users_df['Env'] == selected_env) &
+        (users_df['Group'].isins(ordered_test_cases_df['Group'].unique()))
+    ]
+
+    # Log users for the selected environment
+    main_logger.info("Logging users for the selected environment:")
+    for group in users_df['Group'].unique():
+        user = users_df[env_users_df['Group'] == group]['User'].iloc[0]
+        main_logger.info(f"Group: {group}, User: {user}")
+
     # Handle password retrieval using group names
-    user_passwords = get_user_passwords(env_users_df)
+    user_passwords = get_user_passwords(users_df)
 
-    # Proceed with your existing test case processing logic, passing the DataFrames and the new file paths
-    process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency)
-
-    save_filtered_sheets(result_filepath, selected_env, users_df, trino_env_df, sql_variables_df)
+    process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, ordered_test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency)
 
     # After test execution, log the result file path and all log file paths
     main_logger.info(f"Test execution completed. Results have been saved to: {result_filepath}")
@@ -124,35 +137,23 @@ def main():
         if os.path.exists(path) and os.path.getsize(path) > 0:
             main_logger.info(f"Team '{team}': {path}")
         else:
-            main_logger.info(f"No log entries were made for team '{team}', so the log file may be empty or not created.")
+            main_logger.warn(f"No log entries were made for team '{team}', so the log file may be empty or not created.")
 
 def save_filtered_sheets(result_filepath, selected_env, users_df, trino_env_df, sql_variables_df):
-    # Load the existing workbook
-    workbook = load_workbook(result_filepath)
-
     # Save the filtered Users sheet
     filtered_users_df = users_df[users_df['Env'] == selected_env]
     with pd.ExcelWriter(result_filepath, engine='openpyxl', mode='a') as writer:
-        writer.book = workbook
-        writer.sheets = {ws.title: ws for ws in workbook.worksheets}
         filtered_users_df.to_excel(writer, sheet_name='Users', index=False)
 
     # Save the filtered Trino Env sheet
     filtered_trino_env_df = trino_env_df[trino_env_df['Env'] == selected_env]
     with pd.ExcelWriter(result_filepath, engine='openpyxl', mode='a') as writer:
-        writer.book = workbook
-        writer.sheets = {ws.title: ws for ws in workbook.worksheets}
         filtered_trino_env_df.to_excel(writer, sheet_name='Trino Env', index=False)
 
     # Save the filtered SQL Variables sheet
     filtered_sql_variables_df = sql_variables_df[sql_variables_df['Env'] == selected_env]
     with pd.ExcelWriter(result_filepath, engine='openpyxl', mode='a') as writer:
-        writer.book = workbook
-        writer.sheets = {ws.title: ws for ws in workbook.worksheets}
         filtered_sql_variables_df.to_excel(writer, sheet_name='SQL Variables', index=False)
-
-    # Save the workbook
-    workbook.save(result_filepath)
 
 # Function to display the execution summary
 def display_summary(ordered_test_cases_df, total_test_cases, refresh_frequency):
@@ -473,26 +474,8 @@ def execute_test_cases(ordered_test_cases_df, trino_env_df, users_df, selected_e
             else:
                 ordered_test_cases_df.loc[index, 'Result'] = 'FAIL'
 
-def process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency):
+def process_test_cases(result_filepath, selected_env, selected_teams, user_passwords, ordered_test_cases_df, users_df, trino_env_df, sql_variables_df, refresh_frequency):
     global execution_complete  # Use the global execution_complete flag
-    
-    if 'Expected Response' in test_cases_df.columns:
-        test_cases_df['Expected Response'] = test_cases_df['Expected Response'].astype(str).fillna("")
-    else:
-        test_cases_df['Expected Response'] = ""  # Initialize if not present
-    
-    # Filter test cases based on Execution Type
-    setup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Setup']
-    cleanup_test_cases = test_cases_df[test_cases_df['Execution Type'] == 'Clean up']
-    
-    # Select only the 'Test' test cases for the selected teams
-    team_test_cases_df = test_cases_df[
-        (test_cases_df['Execution Type'] == 'Test') & 
-        (test_cases_df['Team'].isin(selected_teams))
-    ]
-
-    # Combine all test cases in the correct order: Setup -> Test -> Clean up
-    ordered_test_cases_df = pd.concat([setup_test_cases, team_test_cases_df, cleanup_test_cases], ignore_index=True)
 
     # Initialize columns
     ordered_test_cases_df['Actual Status'] = ""
@@ -500,6 +483,11 @@ def process_test_cases(result_filepath, selected_env, selected_teams, user_passw
     ordered_test_cases_df['Result'] = ""
     ordered_test_cases_df['Executed SQL'] = ""
     ordered_test_cases_df['Error Message'] = ""
+
+    if 'Expected Response' in ordered_test_cases_df.columns:
+        ordered_test_cases_df['Expected Response'] = test_cases_df['Expected Response'].astype(str)
+    else:
+        ordered_test_cases_df['Expected Response'] = ""  # Initialize if not present
     
     total_test_cases = len(ordered_test_cases_df)
 
@@ -534,6 +522,7 @@ def process_test_cases(result_filepath, selected_env, selected_teams, user_passw
     # Write the results to the Excel file first
     save_results_to_new_excel(result_filepath, ordered_test_cases_df)
     apply_result_formatting(result_filepath, ordered_test_cases_df)
+    save_filtered_sheets(result_filepath, selected_env, users_df, trino_env_df, sql_variables_df)
 
     # Mark the execution as complete
     execution_complete = True
