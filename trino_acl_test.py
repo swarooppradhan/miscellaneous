@@ -27,7 +27,7 @@ data_lock = threading.Lock()
 def main():
     # Set up argument parsing
     parser = argparse.ArgumentParser(
-        description="Script to execute SQL test cases using Trino based on an Excel file input. "
+        description="Script to execute SQL test cases for Trino based on an Excel file input. "
                     "It runs Setup, Test, and Clean up cases based on selected teams and environment."
     )
     parser.add_argument('-f', '--file', type=str, help='Path to the Excel file')
